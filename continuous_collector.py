@@ -23,6 +23,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 EXPECTED_PRICE_ROWS = 8641
 EXPECTED_OI_ROWS = 8641
 EXPECTED_FEATURE_ROWS = 1800
+EXPECTED_NEON_BRANCH_ID = "br-lingering-grass-ao07mgrx"
 STOP = False
 
 def log(event, **fields):
@@ -136,11 +137,24 @@ def verify_baseline_unchanged(conn, baseline):
         if totals[series]["off_grid"]!=0: raise RuntimeError(f"Off-grid {series} rows detected after first write")
     if feature_row["row_count"]!=baseline["features"]["row_count"] or feature_row["checksum"]!=baseline["features"]["checksum"]:
         raise RuntimeError("Existing amt_30m_features history changed")
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT COUNT(*)::bigint AS unmatched_slots FROM (
+              (SELECT candle_time FROM research.delta_candles WHERE series_type='PRICE' AND candle_time > %s
+               EXCEPT SELECT candle_time FROM research.delta_candles WHERE series_type='OI' AND candle_time > %s)
+              UNION ALL
+              (SELECT candle_time FROM research.delta_candles WHERE series_type='OI' AND candle_time > %s
+               EXCEPT SELECT candle_time FROM research.delta_candles WHERE series_type='PRICE' AND candle_time > %s)
+            ) gaps
+        """,(baseline["baseline_max"],baseline["baseline_max"],baseline["baseline_max"],baseline["baseline_max"]))
+        unmatched=cur.fetchone()["unmatched_slots"]
+    if unmatched:
+        raise RuntimeError(f"PRICE/OI confirmed candle timestamps are not aligned: {unmatched}")
     return {"historical_price_rows_preserved":EXPECTED_PRICE_ROWS,"historical_oi_rows_preserved":EXPECTED_OI_ROWS,
             "amt_30m_features_preserved":EXPECTED_FEATURE_ROWS,"price_total_rows":totals["PRICE"]["total_rows"],
             "oi_total_rows":totals["OI"]["total_rows"],"price_off_grid":totals["PRICE"]["off_grid"],
             "oi_off_grid":totals["OI"]["off_grid"],"price_last_time":totals["PRICE"]["last_time"],
-            "oi_last_time":totals["OI"]["last_time"],"historical_checksums_unchanged":True}
+            "oi_last_time":totals["OI"]["last_time"],"historical_checksums_unchanged":True,"confirmed_price_oi_timestamps_aligned":True}
 
 def existing_latest(conn):
     with conn.cursor(row_factory=dict_row) as cur:
@@ -222,6 +236,14 @@ def process_cycle(conn,baseline,first_write_verified):
             first_write_verified=True
     else:
         log("cycle_completed",paired_slots=len(paired),provisional_slots=len(provisional),confirmed_slots_seen=len(confirmed))
+    if not first_write_verified:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM research.delta_candles WHERE candle_time > %s",(baseline["baseline_max"],))
+            any_new_confirmed = cur.fetchone()[0] > 0
+        if any_new_confirmed:
+            result=verify_baseline_unchanged(conn,baseline)
+            log("post_first_write_verification",**result)
+            first_write_verified=True
     return first_write_verified
 
 def main():
@@ -231,6 +253,9 @@ def main():
             cur.execute("SELECT current_database() AS db,current_schema() AS schema")
             identity=cur.fetchone()
         if identity["db"]!="amt_research": raise RuntimeError(f"Refusing writes: unexpected database {identity['db']}")
+        configured_branch=os.getenv("NEON_BRANCH_ID")
+        if configured_branch!=EXPECTED_NEON_BRANCH_ID:
+            raise RuntimeError(f"Refusing writes: NEON_BRANCH_ID must equal {EXPECTED_NEON_BRANCH_ID}")
         create_provisional_table(conn)
         baseline=baseline_snapshot(conn)
         log("collector_started",database=identity["db"],neon_branch_id=os.getenv("NEON_BRANCH_ID"),
