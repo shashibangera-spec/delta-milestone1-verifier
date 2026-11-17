@@ -31,7 +31,8 @@ class OIAttributionTests(unittest.TestCase):
         oi = [BOUNDARY, row(0, 103), row(30, 102), row(60, 106)]
         r = calculate_value_area_oi_breakdown(prices, oi, START, 95, 105)
         self.assertFalse(r["valid"])
-        self.assertIn("timestamps differ", r["reason"])\n        self.assertIsNone(r["above"])
+        self.assertIn("timestamps differ", r["reason"])
+        self.assertIsNone(r["above"])
 
     def test_missing_boundary_oi_fails_closed(self):
         r = calculate_value_area_oi_breakdown([row(0, 100)], [row(0, 101)], START, 95, 105)
@@ -43,7 +44,8 @@ class OIAttributionTests(unittest.TestCase):
         oi = [BOUNDARY, row(0, 103), row(60, 106)]
         r = calculate_value_area_oi_breakdown(prices, oi, START, 95, 105)
         self.assertFalse(r["valid"])
-        self.assertIn("slot is missing", r["reason"])\n        self.assertIsNone(r["above"])
+        self.assertIn("slot is missing", r["reason"])
+        self.assertIsNone(r["above"])
 
 if __name__ == "__main__":
     unittest.main()
