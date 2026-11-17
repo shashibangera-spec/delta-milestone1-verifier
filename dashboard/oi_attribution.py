@@ -34,6 +34,26 @@ def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, 
     latest_oi = float(current_oi[latest_time]["close_value"])
     day_oi = latest_oi - prev_oi
     common_times = sorted(set(current_oi) & set(current_prices))
+    timestamps_match = set(current_oi) == set(current_prices)
+    expected, t = [], start
+    while t <= latest_time:
+        expected.append(t)
+        t += BAR
+    contiguous = sorted(current_oi) == expected
+    complete_pairs = (timestamps_match and contiguous and bool(common_times)
+                      and common_times[0] == start and common_times[-1] == latest_time)
+    if not complete_pairs:
+        reasons = []
+        if not timestamps_match:
+            reasons.append("PRICE/OI confirmed candle timestamps differ.")
+        if not contiguous:
+            reasons.append("A confirmed 30m slot is missing between the reset and latest OI candle.")
+        if not common_times:
+            reasons.append("No paired confirmed PRICE/OI candles are available.")
+        return {"valid": False, "reason": " ".join(reasons),
+                "prev_oi": prev_oi, "day_oi": day_oi, "above": None, "inside": None, "below": None,
+                "latest_oi": latest_oi, "candle_count": len(common_times), "discrepancy": None}
+
     above = inside = below = 0.0
     previous_close = prev_oi
     for timestamp in common_times:
@@ -48,24 +68,8 @@ def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, 
             inside += delta
         previous_close = current_close
     discrepancy = above + inside + below - day_oi
-    timestamps_match = set(current_oi) == set(current_prices)
-    expected, t = [], start
-    while t <= latest_time:
-        expected.append(t)
-        t += BAR
-    contiguous = sorted(current_oi) == expected
-    valid = (timestamps_match and contiguous and bool(common_times)
-             and common_times[0] == start and common_times[-1] == latest_time
-             and abs(discrepancy) <= 1e-8)
-    reasons = []
-    if not timestamps_match:
-        reasons.append("PRICE/OI confirmed candle timestamps differ.")
-    if not contiguous:
-        reasons.append("A confirmed 30m slot is missing between the reset and latest OI candle.")
-    if abs(discrepancy) > 1e-8:
-        reasons.append("OI zone buckets do not reconcile to DAY OI.")
-    if not common_times:
-        reasons.append("No paired confirmed PRICE/OI candles are available.")
-    return {"valid": bool(valid), "reason": " ".join(reasons) if reasons else "All confirmed 30m candles reconcile exactly.",
+    valid = abs(discrepancy) <= 1e-8
+    reason = "All confirmed 30m candles reconcile exactly." if valid else "OI zone buckets do not reconcile to DAY OI."
+    return {"valid": bool(valid), "reason": reason,
             "prev_oi": prev_oi, "day_oi": day_oi, "above": above, "inside": inside, "below": below,
             "latest_oi": latest_oi, "candle_count": len(common_times), "discrepancy": discrepancy}
