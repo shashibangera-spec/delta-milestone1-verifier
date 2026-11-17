@@ -42,7 +42,8 @@ def fetch_data():
         FROM research.delta_candles_provisional
         WHERE source = 'delta_india'
           AND resolution = '30m'
-          AND candle_time >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - interval '1 day'
+          AND candle_time >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - interval '1 day'
+          AND candle_time < now()
         ORDER BY candle_time DESC
     """).fetchall()
     cols = ["symbol","series_type","candle_time","open_value","high_value","low_value","close_value","volume"]
