@@ -2,6 +2,8 @@
 """Read-only Delta India BTCUSD Milestone 1 feed verifier. No database clients or writes."""
 import json, math, os, statistics, time, urllib.parse, urllib.request
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+IST = ZoneInfo('Asia/Kolkata')
 from collections import Counter
 
 import websocket
@@ -34,7 +36,7 @@ last_msg_wall = None
 reconnects = 0
 
 OUT({"event":"worker_started","symbol":SYMBOL,"start_utc":start_utc.isoformat(),
-     "start_ist":datetime.now(timezone.utc).astimezone().isoformat(),
+     "start_ist":datetime.now(timezone.utc).astimezone(IST).isoformat(),
      "observation_seconds":DURATION,"neon_connection":False,"neon_writes":0})
 
 def on_open(ws):
@@ -133,16 +135,16 @@ for x in tickers:
         oi_by_slot.setdefault(slot,[]).append(x["oi0"])
 oi_window_summary = []
 for slot, vals in sorted(oi_by_slot.items()):
-    oi_window_summary.append({"slot_utc":iso(slot),"slot_ist":datetime.fromtimestamp(slot,timezone.utc).astimezone().isoformat(),
+    oi_window_summary.append({"slot_utc":iso(slot),"slot_ist":datetime.fromtimestamp(slot,timezone.utc).astimezone(IST).isoformat(),
                               "samples":len(vals),"first":vals[0],"max":max(vals),"min":min(vals),"last":vals[-1]})
 summary = {
  "event":"milestone1_verification_report",
  "observation":{"start_utc":start_utc.isoformat(),"end_utc":end_utc.isoformat(),
-                "start_ist":start_utc.astimezone().isoformat(),"end_ist":end_utc.astimezone().isoformat(),
+                "start_ist":start_utc.astimezone(IST).isoformat(),"end_ist":end_utc.astimezone(IST).isoformat(),
                 "duration_seconds":round(end_wall-start_wall,1)},
  "rest_30m":{"success":rest_error is None,"error":rest_error,"rows":len(rest_rows),
              "timestamps_on_1800s_grid":len(grid_bad)==0,"off_grid_count":len(grid_bad),
-             "daily_00utc_0530ist_anchors":[{"utc":iso(t),"ist":datetime.fromtimestamp(t,timezone.utc).astimezone().isoformat()} for t in anchors]},
+             "daily_00utc_0530ist_anchors":[{"utc":iso(t),"ist":datetime.fromtimestamp(t,timezone.utc).astimezone(IST).isoformat()} for t in anchors]},
  "websocket":{"ticker_messages":len(tickers),"candle_update_messages":len(candles),"reconnects":reconnects,
               "errors":errors[:30],"ticker_interval_seconds":{"median":statistics.median(intervals) if intervals else None,
               "mean":statistics.mean(intervals) if intervals else None,"max":max(intervals) if intervals else None},
