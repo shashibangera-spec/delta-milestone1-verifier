@@ -177,8 +177,8 @@ def upsert_row(conn,symbol,series_type,candle,provisional=False):
     else:
         conn.execute("""
             INSERT INTO research.delta_candles
-              (id,source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value,volume,raw_payload,retrieved_at)
-            VALUES (nextval('research.delta_candles_id_seq'),'delta_india',%s,%s,'30m',%s,%s,%s,%s,%s,%s,%s::jsonb,now())
+              (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value,volume,raw_payload,retrieved_at)
+            VALUES ('delta_india',%s,%s,'30m',%s,%s,%s,%s,%s,%s,%s::jsonb,now())
             ON CONFLICT (source,symbol,series_type,resolution,candle_time)
             DO UPDATE SET open_value=EXCLUDED.open_value,high_value=EXCLUDED.high_value,low_value=EXCLUDED.low_value,
               close_value=EXCLUDED.close_value,volume=EXCLUDED.volume,raw_payload=EXCLUDED.raw_payload,retrieved_at=now()
