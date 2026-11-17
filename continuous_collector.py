@@ -19,7 +19,7 @@ SLOT_SECONDS = 1800
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 FINALIZATION_GRACE_SECONDS = int(os.getenv("FINALIZATION_GRACE_SECONDS", "15"))
 LOOKBACK_SECONDS = 3 * 24 * 3600
-DATABASE_URL = os.environ["DATABASE_URL"]
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 EXPECTED_PRICE_ROWS = 8641
 EXPECTED_OI_ROWS = 8641
 EXPECTED_FEATURE_ROWS = 1800
@@ -193,6 +193,7 @@ def process_cycle(conn,baseline,first_write_verified):
     max_price=int(latest["PRICE"].timestamp())
     max_oi=int(latest["OI"].timestamp())
     saved=[]
+    conn.commit()
     conn.execute("BEGIN")
     try:
         for slot in provisional:
