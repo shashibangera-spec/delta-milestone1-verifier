@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 
 import websocket
+from oi_metrics import CONTRACT_VALUE_BTC, contracts_to_btc, candle_validation_status
 
 SYMBOL = "BTCUSD"
 OI_SYMBOL = f"OI:{SYMBOL}"
@@ -236,6 +237,10 @@ for slot, samples in sorted(samples_by_slot.items()):
     values = [sample["oi0"] for sample in samples]
     rest = oi_by_slot.get(slot)
     stream_min, stream_max, stream_last = min(values), max(values), values[-1]
+    stream_min_btc = contracts_to_btc(stream_min)
+    stream_max_btc = contracts_to_btc(stream_max)
+    stream_last_btc = contracts_to_btc(stream_last)
+    candle_status = candle_validation_status(start_wall, end_wall, slot, 1800)
     comparison = {
         "slot_open_utc": iso_utc(slot),
         "slot_open_ist": iso_ist(slot),
@@ -245,20 +250,25 @@ for slot, samples in sorted(samples_by_slot.items()):
         "stream_oi_min": stream_min,
         "stream_oi_max": stream_max,
         "stream_oi_last": stream_last,
+        "contract_value_btc": CONTRACT_VALUE_BTC,
+        "stream_oi_btc_min": stream_min_btc,
+        "stream_oi_btc_max": stream_max_btc,
+        "stream_oi_btc_last": stream_last_btc,
         "rest_oi_candle": rest,
+        "candle_validation_status": candle_status,
         "rest_candle_found": rest is not None,
         "stream_min_inside_rest_low_high": (
-            stream_min >= rest["low"] and stream_min <= rest["high"]
+            stream_min_btc >= rest["low"] and stream_min_btc <= rest["high"]
             if rest and rest["low"] is not None and rest["high"] is not None else None
         ),
         "stream_max_inside_rest_low_high": (
-            stream_max >= rest["low"] and stream_max <= rest["high"]
+            stream_max_btc >= rest["low"] and stream_max_btc <= rest["high"]
             if rest and rest["low"] is not None and rest["high"] is not None else None
         ),
         "stream_last_vs_rest_close_difference": (
-            stream_last - rest["close"] if rest and rest["close"] is not None else None
+            stream_last_btc - rest["close"] if rest and rest["close"] is not None else None
         ),
-        "full_30m_slot_observed": start_wall <= slot and end_wall >= slot + 1800,
+        "full_30m_slot_observed": candle_status == "COMPLETE_30M_OBSERVATION",
         "close_comparison_is_final": end_wall >= slot + 1800,
     }
     comparisons.append(comparison)
@@ -290,6 +300,10 @@ summary = {
         "oi0_contracts_min": min(valid_oi0) if valid_oi0 else None,
         "oi0_contracts_max": max(valid_oi0) if valid_oi0 else None,
         "oi0_contracts_last": valid_oi0[-1] if valid_oi0 else None,
+        "contract_value_btc": CONTRACT_VALUE_BTC,
+        "oi0_btc_min": contracts_to_btc(min(valid_oi0)) if valid_oi0 else None,
+        "oi0_btc_max": contracts_to_btc(max(valid_oi0)) if valid_oi0 else None,
+        "oi0_btc_last": contracts_to_btc(valid_oi0[-1]) if valid_oi0 else None,
         "oi1_change_values_min": min(valid_oi1) if valid_oi1 else None,
         "oi1_change_values_max": max(valid_oi1) if valid_oi1 else None,
         "ticker_interval_seconds": {
