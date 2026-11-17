@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import psycopg
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
+from oi_attribution import calculate_value_area_oi_breakdown
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
 
@@ -164,14 +165,58 @@ else:
     st.warning("No confirmed PRICE candles available.")
 
 st.divider()
-st.subheader("2 · AMT STRUCTURE")
+st.subheader("2 · SESSION OI ATTRIBUTION")
+st.caption("PREV OI is the confirmed OI close at the previous 05:30 IST boundary. Each subsequent confirmed 30m OI close-to-close change is assigned by that candle's confirmed PRICE close against fixed Prior Day value levels.")
+oi_session = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time") if not oi.empty else pd.DataFrame()
+price_session = price[(price.candle_time >= session_start) & (price.candle_time < next_start)].sort_values("candle_time") if not price.empty else pd.DataFrame()
+breakdown = None
+if prior_profile:
+    breakdown = calculate_value_area_oi_breakdown(candle_dicts(price_session), candle_dicts(oi), session_start, prior_profile["VAL"], prior_profile["VAH"])
+if breakdown is None:
+    st.warning("OI attribution unavailable until the confirmed Prior Day VAL and VAH profile is available.")
+else:
+    prev_col, day_col = st.columns(2)
+    prev_col.metric("PREV OI", f"{breakdown['prev_oi']:,.3f} BTC" if breakdown["prev_oi"] is not None else "—",
+                    help="Confirmed OI close of the final 30m candle ending exactly at 05:30 IST.")
+    day_col.metric("DAY OI", f"{breakdown['day_oi']:+,.3f} BTC" if breakdown["day_oi"] is not None else "—",
+                   help="Latest confirmed OI close minus PREV OI. Positive means net addition; negative means net deletion.")
+    st.markdown("**Vertical Value & OI Breakup Ladder**")
+    st.caption("Fixed reference: Prior Day VAH / POC / VAL. Both Prior VAL and Prior VAH are included inside Value.")
+    with st.container(border=True):
+        st.markdown("**ABOVE VALUE**")
+        st.metric("Net OI added / deleted above Prior VAH", f"{breakdown['above']:+,.3f} BTC" if breakdown["above"] is not None else "—")
+        st.divider()
+        st.markdown("**VALUE HIGH · Prior VAH**")
+        st.metric("Prior VAH", money(prior_profile["VAH"]))
+        st.divider()
+        st.markdown("**POC + INSIDE VALUE**")
+        poc_col, inside_col = st.columns(2)
+        poc_col.metric("Prior POC", money(prior_profile["POC"]))
+        inside_col.metric("Net OI inside Value", f"{breakdown['inside']:+,.3f} BTC" if breakdown["inside"] is not None else "—")
+        st.divider()
+        st.markdown("**VALUE LOW · Prior VAL**")
+        st.metric("Prior VAL", money(prior_profile["VAL"]))
+        st.divider()
+        st.markdown("**BELOW VALUE**")
+        st.metric("Net OI added / deleted below Prior VAL", f"{breakdown['below']:+,.3f} BTC" if breakdown["below"] is not None else "—")
+    if breakdown["valid"]:
+        st.success(f"OI attribution reconciled: ABOVE + INSIDE + BELOW = DAY OI = {breakdown['day_oi']:+,.3f} BTC · {breakdown['candle_count']} paired confirmed 30m candles · discrepancy {breakdown['discrepancy']:+.8f} BTC.")
+    else:
+        st.warning("OI attribution is NOT certified as a complete session breakdown: " + breakdown["reason"])
+    if latest_oi is not None:
+        st.caption(f"Latest confirmed OI: {float(latest_oi.close_value):,.3f} BTC · {fmt_ts(latest_oi.candle_time)}")
+    if not oi_session.empty:
+        st.line_chart(oi_session.set_index("candle_time")["close_value"], height=180)
+
+st.divider()
+st.subheader("3 · DEVELOPING AMT STRUCTURE")
 st.caption("Developing levels include confirmed 30m brackets in the current 00:00–00:00 UTC session only. The in-progress candle is excluded.")
 if developing_profile:
     a,b,c = st.columns(3)
     a.metric("Developing VAL", money(developing_profile["VAL"]))
     b.metric("Developing POC", money(developing_profile["POC"]))
     c.metric("Developing VAH", money(developing_profile["VAH"]))
-    st.caption(f"Confirmed brackets: {len(developing):,} / 48 • TPO counts: {developing_profile['TPOs']:,} • Occupied $50 rows: {developing_profile['Rows']:,}")
+    st.caption(f"Confirmed brackets: {len(developing):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
     if prior_profile:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
         st.metric("VA Expansion vs Prior", money(width_delta), help="Difference in value-area width; positive means wider, negative means narrower.")
@@ -179,21 +224,7 @@ else:
     st.warning("Developing profile not available yet for the current UTC session.")
 
 st.divider()
-st.subheader("3 · DELTA FUTURES OI & DATA INTEGRITY")
-if not oi.empty:
-    oi_session = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
-    latest_oi = oi.sort_values("candle_time").iloc[-1]
-    st.metric("Latest confirmed OI · BTC", f"{float(latest_oi.close_value):,.3f}")
-    st.caption(f"Latest confirmed OI candle: {fmt_ts(latest_oi.candle_time)}")
-    if len(oi_session) >= 2:
-        first_oi = float(oi_session.iloc[0].open_value)
-        last_oi = float(oi_session.iloc[-1].close_value)
-        delta = last_oi - first_oi
-        st.metric("Current session OI change", f"{delta:+,.3f} BTC", f"{(delta/first_oi*100):+.3f}%" if first_oi else None)
-    st.line_chart(oi_session.set_index("candle_time")["close_value"], height=180)
-else:
-    st.warning("No confirmed OI candles found.")
-
+st.subheader("4 · PROVISIONAL DATA & DATA INTEGRITY")
 prov_price = provisional_df[(provisional_df.series_type == "PRICE") & (provisional_df.symbol == "BTCUSD")] if not provisional_df.empty else pd.DataFrame()
 prov_oi = provisional_df[(provisional_df.series_type == "OI") & (provisional_df.symbol == "OI:BTCUSD")] if not provisional_df.empty else pd.DataFrame()
 with st.container(border=True):
