@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import psycopg
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
 
@@ -101,6 +102,7 @@ def money(value):
 
 st.title("BTC AMT Research Dashboard")
 st.caption("ISOLATED RESEARCH • Neon amt_research • SELECT-only database role")
+st_autorefresh(interval=45_000, key="dashboard_auto_refresh")
 st.info("Research-derived AMT from completed Delta 30-minute candles. This is not the locked Pine v7.2.2 production calculation and must be validated against it before operational use.")
 
 if st.button("↻ Refresh data"):
@@ -220,5 +222,5 @@ if not price_only and not oi_only:
 else:
     st.warning("PRICE/OI timestamp mismatch detected in the loaded window.")
 
-st.caption(f"Loaded {len(price):,} confirmed PRICE and {len(oi):,} confirmed OI candles. Auto-refresh cache: 45 seconds. All times shown in IST unless explicitly marked UTC.")
+st.caption(f"Loaded {len(price):,} confirmed PRICE and {len(oi):,} confirmed OI candles. Automatic page refresh: every 45 seconds. All times shown in IST unless explicitly marked UTC.")
 st.caption("TPO method: each confirmed 30m candle contributes one count to every $50 row touched from low through high (inclusive); POC is the most-counted row (lower row wins ties); 70% value area expands to the higher-count adjacent row, with ties expanding lower. Research prototype pending Pine parity validation.")
