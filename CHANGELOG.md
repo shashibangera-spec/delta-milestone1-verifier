@@ -6,3 +6,11 @@
 - Label any 30-minute candle not fully covered by the observation window as `PROVISIONAL_INCOMPLETE`.
 - Add regression tests for contract conversion, unit-consistent comparison, and provisional versus complete candle coverage.
 - The original 65-minute Milestone 1 baseline report remains unchanged.
+
+
+## Milestone 2 — continuous research collector
+
+- Added a 24/7 Railway worker that polls Delta's BTCUSD PRICE and OI:BTCUSD 30-minute REST candles.
+- Confirmed candles are saved atomically to `research.delta_candles` with conflict-safe upserts; unfinished candles are isolated in `research.delta_candles_provisional` and labelled `PROVISIONAL_INCOMPLETE`.
+- Startup guards require the verified historical baseline (8,641 PRICE, 8,641 OI, 1,800 AMT feature rows). First confirmed save triggers row-count, checksum, and 30-minute grid verification.
+- Collector is restricted to Neon database `amt_research`; branch ID is explicitly configured as `br-lingering-grass-ao07mgrx`.
