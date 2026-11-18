@@ -28,14 +28,13 @@ def utc_midnight(dt):
 
 def fetch_data():
     conn = get_connection()
-    # Two complete AMT sessions: prior UTC day and current UTC day.
+    # Full retained confirmed history is required for historical session selection.
     rows = conn.execute("""
         SELECT symbol, series_type, candle_time, open_value, high_value,
                low_value, close_value, volume
         FROM research.delta_candles
         WHERE source = 'delta_india'
           AND resolution = '30m'
-          AND candle_time >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - interval '1 day'
           AND candle_time < now()
         ORDER BY candle_time ASC
     """).fetchall()
@@ -156,6 +155,7 @@ st.info("Research-derived AMT from completed Delta 30-minute candles. This is no
 
 prior = price[(price.candle_time >= prior_start) & (price.candle_time < session_start)].sort_values("candle_time")
 session_price = price[(price.candle_time >= session_start) & (price.candle_time < next_start)].sort_values("candle_time")
+session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
 prior_profile = complete_profile(prior, prior_start)
 session_profile = complete_profile(session_price, session_start) if not is_live else None
 developing_profile = tpo_profile(candle_dicts(session_price)) if is_live else session_profile
@@ -248,9 +248,9 @@ st.subheader("3 · " + ("DEVELOPING AMT STRUCTURE" if is_live else "COMPLETED SE
 st.caption("Developing levels use confirmed 30m brackets only; historical session levels require all 48 confirmed brackets.")
 if developing_profile:
     a,b,c = st.columns(3)
-    a.metric("Developing VAL", money(developing_profile["VAL"]))
-    b.metric("Developing POC", money(developing_profile["POC"]))
-    c.metric("Developing VAH", money(developing_profile["VAH"]))
+    a.metric("Developing VAL" if is_live else "Session VAL", money(developing_profile["VAL"]))
+    b.metric("Developing POC" if is_live else "Session POC", money(developing_profile["POC"]))
+    c.metric("Developing VAH" if is_live else "Session VAH", money(developing_profile["VAH"]))
     st.caption(f"Confirmed brackets: {len(session_price):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
     if prior_profile and is_live:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
@@ -286,10 +286,12 @@ m1,m2,m3 = st.columns(3)
 m1.metric("Shared candle slots", f"{len(common):,}")
 m2.metric("PRICE-only slots", f"{len(price_only):,}")
 m3.metric("OI-only slots", f"{len(oi_only):,}")
-if not price_only and not oi_only:
-    st.success("Confirmed PRICE and OI timestamps are fully aligned in the loaded window.")
+if price_times and oi_times and not price_only and not oi_only:
+    st.success("Confirmed PRICE and OI timestamps are fully aligned for the selected session.")
+elif not price_times or not oi_times:
+    st.warning("PRICE/OI synchronization cannot be assessed: one or both confirmed series are missing for this session.")
 else:
-    st.warning("PRICE/OI timestamp mismatch detected in the loaded window.")
+    st.warning("PRICE/OI timestamp mismatch detected for the selected session.")
 
 st.caption(f"Selected session: {len(price_session):,} confirmed PRICE and {len(oi_session):,} confirmed OI candles. " + ("Automatic refresh: every 45 seconds (live mode)." if is_live else "Auto-refresh paused (historical mode).") + " All times shown in IST unless explicitly marked UTC.")
 st.caption("TPO method: each confirmed 30m candle contributes one count to every $50 row touched from low through high (inclusive); POC is the most-counted row (lower row wins ties); 70% value area expands to the higher-count adjacent row, with ties expanding lower. Research prototype pending Pine parity validation.")
