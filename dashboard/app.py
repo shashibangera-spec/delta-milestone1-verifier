@@ -92,6 +92,16 @@ def tpo_profile(candles):
 def candle_dicts(df):
     return df.to_dict("records")
 
+def is_complete_session(df, start):
+    expected = pd.date_range(start=start, periods=48, freq="30min")
+    if df.empty:
+        return False
+    actual = pd.DatetimeIndex(df["candle_time"].sort_values().drop_duplicates())
+    return len(df) == 48 and len(actual) == 48 and actual.equals(expected)
+
+def complete_profile(df, start):
+    return tpo_profile(candle_dicts(df)) if is_complete_session(df, start) else None
+
 def fmt_ts(value):
     if pd.isna(value):
         return "—"
@@ -103,12 +113,6 @@ def money(value):
 
 st.title("BTC AMT Research Dashboard")
 st.caption("ISOLATED RESEARCH • Neon amt_research • SELECT-only database role")
-st_autorefresh(interval=45_000, key="dashboard_auto_refresh")
-st.info("Research-derived AMT from completed Delta 30-minute candles. This is not the locked Pine v7.2.2 production calculation and must be validated against it before operational use.")
-
-if st.button("↻ Refresh data"):
-    st.cache_data.clear()
-    st.rerun()
 
 @st.cache_data(ttl=45)
 def load_frames():
@@ -120,25 +124,45 @@ except Exception as exc:
     st.error(f"Database read failed: {exc}")
     st.stop()
 
-now_utc = datetime.now(timezone.utc)
-session_start = utc_midnight(now_utc)
-prior_start = session_start - timedelta(days=1)
-next_start = session_start + timedelta(days=1)
-ist_start = session_start.astimezone(IST)
-
 price = price_df[(price_df.series_type == "PRICE") & (price_df.symbol == "BTCUSD")].copy()
 oi = price_df[(price_df.series_type == "OI") & (price_df.symbol == "OI:BTCUSD")].copy()
 for frame in (price, oi):
     if not frame.empty:
         frame["candle_time"] = pd.to_datetime(frame["candle_time"], utc=True)
 
-prior = price[(price.candle_time >= prior_start) & (price.candle_time < session_start)]
-developing = price[(price.candle_time >= session_start) & (price.candle_time < next_start)]
-prior_profile = tpo_profile(candle_dicts(prior))
-developing_profile = tpo_profile(candle_dicts(developing))
+now_utc = datetime.now(timezone.utc)
+live_session_start = utc_midnight(now_utc)
+available_dates = sorted({ts.date() for ts in price["candle_time"]}) if not price.empty else []
+historical_dates = [d for d in available_dates if d < live_session_start.date()]
+selection_labels = ["Live / Current Session"] + [d.isoformat() for d in reversed(historical_dates)]
+selection = st.selectbox("SESSION DATE", selection_labels, index=0, help="Historical dates represent a completed 05:30 IST → 05:30 IST session. Live is the default.")
+is_live = selection == "Live / Current Session"
+if is_live:
+    session_start = live_session_start
+    st_autorefresh(interval=45_000, key="dashboard_auto_refresh")
+else:
+    selected_date = datetime.strptime(selection, "%Y-%m-%d").date()
+    session_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=timezone.utc)
+    st.success(f"COMPLETED HISTORICAL SESSION · {selected_date.strftime('%d %b %Y')} · 05:30 IST → 05:30 IST")
+prior_start = session_start - timedelta(days=1)
+next_start = session_start + timedelta(days=1)
+ist_start = session_start.astimezone(IST)
 
-latest_price = price.sort_values("candle_time").iloc[-1] if not price.empty else None
-latest_oi = oi.sort_values("candle_time").iloc[-1] if not oi.empty else None
+if st.button("↻ Refresh data"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.info("Research-derived AMT from completed Delta 30-minute candles. This is not the locked Pine v7.2.2 production calculation and must be validated against it before operational use.")
+
+prior = price[(price.candle_time >= prior_start) & (price.candle_time < session_start)].sort_values("candle_time")
+session_price = price[(price.candle_time >= session_start) & (price.candle_time < next_start)].sort_values("candle_time")
+prior_profile = complete_profile(prior, prior_start)
+session_profile = complete_profile(session_price, session_start) if not is_live else None
+developing_profile = tpo_profile(candle_dicts(session_price)) if is_live else session_profile
+
+latest_price = session_price.iloc[-1] if not session_price.empty else None
+session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
+latest_oi = session_oi.iloc[-1] if not session_oi.empty else None
 
 st.subheader("1 · PRICE ACTION & PRIOR VALUE AREA")
 st.caption(f"AMT session reset: {ist_start.strftime('%d %b %Y, %H:%M')} IST / {session_start.strftime('%H:%M')} UTC")
@@ -148,7 +172,18 @@ if prior_profile:
     st.metric("Prior VAL", money(prior_profile["VAL"]))
     st.metric("Prior VA Width", money(prior_profile["VAH"] - prior_profile["VAL"]))
 else:
-    st.warning("Prior profile unavailable: no confirmed PRICE candles found for the previous 00:00–00:00 UTC session.")
+    st.warning("Prior Day profile unavailable or incomplete: the previous session must contain all 48 confirmed 30m PRICE candles. Historical dates near the start of retained history may not have a preceding session.")
+
+if not is_live:
+    st.markdown("**Selected completed session profile**")
+    if session_profile:
+        sv1, sv2, sv3 = st.columns(3)
+        sv1.metric("Session VAH", money(session_profile["VAH"]))
+        sv2.metric("Session POC", money(session_profile["POC"]))
+        sv3.metric("Session VAL", money(session_profile["VAL"]))
+        st.caption("Calculated from all 48 confirmed 30m PRICE brackets in the selected historical session.")
+    else:
+        st.warning("Session profile unavailable: the selected date does not contain all 48 confirmed 30m PRICE candles.")
 
 if latest_price is not None:
     cmp = float(latest_price.close_value)
@@ -167,11 +202,11 @@ else:
 st.divider()
 st.subheader("2 · SESSION OI ATTRIBUTION")
 st.caption("PREV OI is the confirmed OI close at the previous 05:30 IST boundary. Each subsequent confirmed 30m OI close-to-close change is assigned by that candle's confirmed PRICE close against fixed Prior Day value levels.")
-oi_session = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time") if not oi.empty else pd.DataFrame()
-price_session = price[(price.candle_time >= session_start) & (price.candle_time < next_start)].sort_values("candle_time") if not price.empty else pd.DataFrame()
+oi_session = session_oi
+price_session = session_price
 breakdown = None
 if prior_profile:
-    breakdown = calculate_value_area_oi_breakdown(candle_dicts(price_session), candle_dicts(oi), session_start, prior_profile["VAL"], prior_profile["VAH"])
+    breakdown = calculate_value_area_oi_breakdown(candle_dicts(price_session), candle_dicts(oi), session_start, prior_profile["VAL"], prior_profile["VAH"], require_complete_session=not is_live)
 if breakdown is None:
     st.warning("OI attribution unavailable until the confirmed Prior Day VAL and VAH profile is available.")
 else:
@@ -209,37 +244,40 @@ else:
         st.line_chart(oi_session.set_index("candle_time")["close_value"], height=180)
 
 st.divider()
-st.subheader("3 · DEVELOPING AMT STRUCTURE")
-st.caption("Developing levels include confirmed 30m brackets in the current 00:00–00:00 UTC session only. The in-progress candle is excluded.")
+st.subheader("3 · " + ("DEVELOPING AMT STRUCTURE" if is_live else "COMPLETED SESSION AMT STRUCTURE"))
+st.caption("Developing levels use confirmed 30m brackets only; historical session levels require all 48 confirmed brackets.")
 if developing_profile:
     a,b,c = st.columns(3)
     a.metric("Developing VAL", money(developing_profile["VAL"]))
     b.metric("Developing POC", money(developing_profile["POC"]))
     c.metric("Developing VAH", money(developing_profile["VAH"]))
-    st.caption(f"Confirmed brackets: {len(developing):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
-    if prior_profile:
+    st.caption(f"Confirmed brackets: {len(session_price):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
+    if prior_profile and is_live:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
         st.metric("VA Expansion vs Prior", money(width_delta), help="Difference in value-area width; positive means wider, negative means narrower.")
 else:
-    st.warning("Developing profile not available yet for the current UTC session.")
+    st.warning("Selected session profile unavailable because 48 confirmed 30m brackets are required.")
+
+if is_live:
+    st.divider()
+    st.subheader("4 · PROVISIONAL DATA")
+    prov_price = provisional_df[(provisional_df.series_type == "PRICE") & (provisional_df.symbol == "BTCUSD")] if not provisional_df.empty else pd.DataFrame()
+    prov_oi = provisional_df[(provisional_df.series_type == "OI") & (provisional_df.symbol == "OI:BTCUSD")] if not provisional_df.empty else pd.DataFrame()
+    with st.container(border=True):
+        st.markdown("**PROVISIONAL_INCOMPLETE · excluded from AMT and confirmed OI metrics**")
+        if not prov_price.empty or not prov_oi.empty:
+            for label, frame in [("PRICE", prov_price), ("OI", prov_oi)]:
+                if not frame.empty:
+                    item = frame.iloc[0]
+                    st.write(f"{label} · {item.status} · candle slot {fmt_ts(item.candle_time)}")
+                    st.write(f"O {money(item.open_value)} · H {money(item.high_value)} · L {money(item.low_value)} · C {money(item.close_value)}")
+        else:
+            st.caption("No provisional candle currently staged.")
 
 st.divider()
-st.subheader("4 · PROVISIONAL DATA & DATA INTEGRITY")
-prov_price = provisional_df[(provisional_df.series_type == "PRICE") & (provisional_df.symbol == "BTCUSD")] if not provisional_df.empty else pd.DataFrame()
-prov_oi = provisional_df[(provisional_df.series_type == "OI") & (provisional_df.symbol == "OI:BTCUSD")] if not provisional_df.empty else pd.DataFrame()
-with st.container(border=True):
-    st.markdown("**PROVISIONAL_INCOMPLETE · excluded from AMT and confirmed OI metrics**")
-    if not prov_price.empty or not prov_oi.empty:
-        for label, frame in [("PRICE", prov_price), ("OI", prov_oi)]:
-            if not frame.empty:
-                item = frame.iloc[0]
-                st.write(f"{label} · {item.status} · candle slot {fmt_ts(item.candle_time)}")
-                st.write(f"O {money(item.open_value)} · H {money(item.high_value)} · L {money(item.low_value)} · C {money(item.close_value)}")
-    else:
-        st.caption("No provisional candle currently staged.")
-
-price_times = set(price.candle_time.tolist()) if not price.empty else set()
-oi_times = set(oi.candle_time.tolist()) if not oi.empty else set()
+st.subheader("5 · DATA INTEGRITY")
+price_times = set(price_session.candle_time.tolist()) if not price_session.empty else set()
+oi_times = set(oi_session.candle_time.tolist()) if not oi_session.empty else set()
 common = price_times & oi_times
 price_only = price_times - oi_times
 oi_only = oi_times - price_times
@@ -253,5 +291,5 @@ if not price_only and not oi_only:
 else:
     st.warning("PRICE/OI timestamp mismatch detected in the loaded window.")
 
-st.caption(f"Loaded {len(price):,} confirmed PRICE and {len(oi):,} confirmed OI candles. Automatic page refresh: every 45 seconds. All times shown in IST unless explicitly marked UTC.")
+st.caption(f"Selected session: {len(price_session):,} confirmed PRICE and {len(oi_session):,} confirmed OI candles. " + ("Automatic refresh: every 45 seconds (live mode)." if is_live else "Auto-refresh paused (historical mode).") + " All times shown in IST unless explicitly marked UTC.")
 st.caption("TPO method: each confirmed 30m candle contributes one count to every $50 row touched from low through high (inclusive); POC is the most-counted row (lower row wins ties); 70% value area expands to the higher-count adjacent row, with ties expanding lower. Research prototype pending Pine parity validation.")
