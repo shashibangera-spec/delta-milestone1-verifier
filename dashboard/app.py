@@ -9,7 +9,7 @@ import psycopg
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from oi_attribution import calculate_value_area_oi_breakdown
-from session_selection import LIVE_SESSION_LABEL, return_to_live_session
+from session_selection import LIVE_SESSION_LABEL, normalize_session_selection, return_to_live_session
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
 
@@ -211,10 +211,7 @@ available_dates = sorted({ts.date() for ts in price["candle_time"]}) if not pric
 historical_dates = [d for d in available_dates if d < live_session_start.date()]
 selection_labels = [LIVE_SESSION_LABEL] + [d.isoformat() for d in reversed(historical_dates)]
 # Keep the selector's value stable across Streamlit reruns and 45-second refreshes.
-if "session_date_selector" not in st.session_state:
-    st.session_state["session_date_selector"] = LIVE_SESSION_LABEL
-if st.session_state["session_date_selector"] not in selection_labels:
-    st.session_state["session_date_selector"] = LIVE_SESSION_LABEL
+normalize_session_selection(st.session_state, selection_labels)
 
 selection = st.selectbox(
     "SESSION DATE",
