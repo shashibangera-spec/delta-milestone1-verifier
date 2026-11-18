@@ -9,6 +9,7 @@ import psycopg
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from oi_attribution import calculate_value_area_oi_breakdown
+from session_selection import LIVE_SESSION_LABEL, normalize_session_selection, return_to_live_session
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
 
@@ -208,9 +209,24 @@ now_utc = datetime.now(timezone.utc)
 live_session_start = utc_midnight(now_utc)
 available_dates = sorted({ts.date() for ts in price["candle_time"]}) if not price.empty else []
 historical_dates = [d for d in available_dates if d < live_session_start.date()]
-selection_labels = ["Live / Current Session"] + [d.isoformat() for d in reversed(historical_dates)]
-selection = st.selectbox("SESSION DATE", selection_labels, index=0, help="Historical dates represent a completed 05:30 IST → 05:30 IST session. Live is the default.")
-is_live = selection == "Live / Current Session"
+selection_labels = [LIVE_SESSION_LABEL] + [d.isoformat() for d in reversed(historical_dates)]
+# Keep the selector's value stable across Streamlit reruns and 45-second refreshes.
+normalize_session_selection(st.session_state, selection_labels)
+
+selection = st.selectbox(
+    "SESSION DATE",
+    selection_labels,
+    key="session_date_selector",
+    help="Historical dates represent a completed 05:30 IST → 05:30 IST session. Live is the default."
+)
+is_live = selection == LIVE_SESSION_LABEL
+if not is_live:
+    st.button(
+        "↩ Return to Live / Current Session",
+        key="return_to_live_session",
+        on_click=return_to_live_session,
+        help="Switch back to the current 05:30 IST session and resume automatic refresh."
+    )
 if is_live:
     session_start = live_session_start
     st_autorefresh(interval=45_000, key="dashboard_auto_refresh")
