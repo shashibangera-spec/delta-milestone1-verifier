@@ -47,5 +47,22 @@ class OIAttributionTests(unittest.TestCase):
         self.assertIn("slot is missing", r["reason"])
         self.assertIsNone(r["above"])
 
+    def test_historical_full_48_bar_session_reconciles(self):
+        prices = [row(i * 30, 100) for i in range(48)]
+        oi = [BOUNDARY] + [row(i * 30, 100 + i) for i in range(48)]
+        r = calculate_value_area_oi_breakdown(prices, oi, START, 95, 105, require_complete_session=True)
+        self.assertTrue(r["valid"], r["reason"])
+        self.assertEqual(r["candle_count"], 48)
+        self.assertAlmostEqual(r["day_oi"], 47.0)
+        self.assertAlmostEqual(r["inside"], 47.0)
+
+    def test_historical_session_missing_final_bar_fails_closed(self):
+        prices = [row(i * 30, 100) for i in range(47)]
+        oi = [BOUNDARY] + [row(i * 30, 100 + i) for i in range(47)]
+        r = calculate_value_area_oi_breakdown(prices, oi, START, 95, 105, require_complete_session=True)
+        self.assertFalse(r["valid"])
+        self.assertIn("complete set of 48", r["reason"])
+        self.assertIsNone(r["above"])
+
 if __name__ == "__main__":
     unittest.main()
