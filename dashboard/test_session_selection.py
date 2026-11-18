@@ -66,7 +66,6 @@ class SessionSelectionStateTests(unittest.TestCase):
         self.assertIn("on_click=return_to_live_session", source)
         self.assertIn('key="custom_auction_date_range"', source)
         self.assertIn('st_autorefresh(interval=45_000, key="dashboard_auto_refresh")', source)
-        # The existing refresh remains conditional on live mode only.
         refresh_if = [
             node for node in ast.walk(tree)
             if isinstance(node, ast.If)
@@ -80,6 +79,14 @@ class SessionSelectionStateTests(unittest.TestCase):
             )
         ]
         self.assertTrue(refresh_if)
+
+    def test_docker_image_copies_session_selection_module(self):
+        dockerfile = Path(__file__).parents[1] / "dashboard" / "Dockerfile"
+        source = dockerfile.read_text(encoding="utf-8")
+        self.assertIn(
+            "COPY dashboard/session_selection.py ./session_selection.py",
+            source,
+        )
 
 
 if __name__ == "__main__":
