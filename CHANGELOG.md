@@ -21,3 +21,11 @@
 - Added fail-closed multi-day PRICE/OI pairing, composite TPO, non-directional OI change statistics, composite-value attribution, first-session range containment, and paired 30m history.
 - Added regression tests for complete three-day windows, missing PRICE/OI candles, missing boundary OI, partial-session ranges, and unpaired timestamps.
 - No collector, database schema/data, production Pine, alert, or Railway deployment changes.
+
+
+## PR 2 — session selector usability
+- Give the session-date selector a stable Streamlit session-state key so its choice survives reruns.
+- Add a historical-mode-only “Return to Live / Current Session” control that restores the Live selection and the existing 45-second refresh.
+- Preserve the independent custom date-range research selector and all existing AMT/OI calculations.
+- Add regression tests for Live default, historical selection persistence, custom-range independence, return-to-live behavior, invalid historical selection fallback, and live-only auto-refresh.
+- UI-only change; no collector, database, schema, AMT methodology, OI attribution, or production deployment changes.
