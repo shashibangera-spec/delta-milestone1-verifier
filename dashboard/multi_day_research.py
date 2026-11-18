@@ -67,6 +67,10 @@ def analyze_multi_day_range(price_candles, oi_candles, start, end_exclusive,
     p = {t: prices[t] for t in expected if t in prices}
     o = {t: oi[t] for t in expected if t in oi}
     problems = []
+    if len(prices) != len(price_candles):
+        problems.append("Duplicate confirmed PRICE timestamps detected.")
+    if len(oi) != len(oi_candles):
+        problems.append("Duplicate confirmed OI timestamps detected.")
     if boundary_time not in oi:
         problems.append("Missing confirmed OI boundary candle immediately before selected start.")
     if len(p) != len(expected):
