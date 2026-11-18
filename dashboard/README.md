@@ -22,3 +22,15 @@
 - Historical Prior Day and Session TPO profiles are shown only when each has all 48 confirmed 30m PRICE candles. Historical OI attribution is certified only with the exact prior-boundary OI close, 48 contiguous confirmed PRICE/OI pairs, identical timestamps, and bucket reconciliation within the strict tolerance.
 - The first retained session date (21 May 2026) may not have its preceding session or 05:30 boundary OI candle in storage. In that case the unavailable Prior Day / PREV OI / attribution values deliberately remain unavailable; the dashboard does not synthesize missing history.
 - Historical views use the same read-only amt_dashboard_ro database role and the same Neon amt_research branch as Live mode. No collector writes are performed.
+
+ 
+## Custom multi-session date-range research
+
+- Optional inclusive date range is separate from the existing Live / Current Session and single historical-session selector.
+- Dates represent 00:00 UTC / 05:30 IST session starts. Every selected date is a full 48-candle session.
+- Analysis fails closed unless all expected confirmed PRICE/OI timestamps exist and match, and the confirmed OI boundary candle immediately before selected start exists.
+- Composite TPO uses the same $50 rows, inclusive candle-range counting, lower-row POC tie-break, 70% target, adjacent-row expansion, and downward tie-break as the existing dashboard.
+- OI change is measured from the boundary reference before selected start through the final selected candle. Counts and value-location attribution are descriptive only, never directional signals.
+- OI location attribution assigns each close-to-close change by confirmed PRICE close relative to composite VAH/VAL; buckets must reconcile to net OI change.
+- First-session high/low containment is separate from composite value. No acceptance/rejection or Pine v7.2.2 parity is implied.
+- Detailed table contains every paired 30m candle. SELECT-only; no collector, schema/data, alert, or Pine changes.

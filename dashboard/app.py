@@ -129,6 +129,81 @@ for frame in (price, oi):
     if not frame.empty:
         frame["candle_time"] = pd.to_datetime(frame["candle_time"], utc=True)
 
+
+# Optional multi-session research view; existing single-session flow remains unchanged.
+st.divider()
+st.subheader("HISTORICAL AUCTION RESEARCH · CUSTOM DATE RANGE")
+st.caption("Inclusive AMT session dates. Each session is 05:30 IST to 05:30 IST and must contain 48 confirmed paired 30m PRICE/OI candles.")
+available_research_dates = sorted({ts.date() for ts in price["candle_time"]}) if not price.empty else []
+completed_research_dates = [d for d in available_research_dates if d < datetime.now(timezone.utc).date()]
+if not completed_research_dates:
+    st.info("No completed historical session dates are available for custom-range research yet.")
+else:
+    default_end = completed_research_dates[-1]
+    default_start = completed_research_dates[max(0, len(completed_research_dates) - 3)]
+    chosen_range = st.date_input(
+        "CUSTOM SESSION RANGE · START → END", value=(default_start, default_end),
+        min_value=completed_research_dates[0], max_value=completed_research_dates[-1],
+        key="custom_auction_date_range",
+        help="Both dates are included. Each date means 05:30 IST to the next 05:30 IST."
+    )
+    if st.button("Analyse custom date range", key="run_custom_auction_research"):
+        if not isinstance(chosen_range, (tuple, list)) or len(chosen_range) != 2:
+            st.warning("Select both a start date and an end date.")
+        else:
+            range_start_date, range_end_date = chosen_range
+            if range_start_date > range_end_date:
+                st.error("Start date must be on or before end date.")
+            else:
+                from multi_day_research import analyze_multi_day_range
+                range_start = datetime.combine(range_start_date, datetime.min.time(), tzinfo=timezone.utc)
+                range_end = datetime.combine(range_end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+                rp = price[(price.candle_time >= range_start) & (price.candle_time < range_end)].sort_values("candle_time")
+                ro = oi[(oi.candle_time >= range_start - timedelta(minutes=30)) & (oi.candle_time < range_end)].sort_values("candle_time")
+                result = analyze_multi_day_range(candle_dicts(rp), candle_dicts(ro), range_start, range_end, row_size=ROW_SIZE, value_area=VALUE_AREA)
+                st.markdown(f"**Selected window:** {range_start_date:%d %b %Y} → {range_end_date:%d %b %Y} · {result['session_count']} AMT sessions")
+                if not result["valid"]:
+                    st.warning("Research result is incomplete; no composite conclusions are certified. " + result["reason"])
+                else:
+                    st.success(f"Data integrity passed · {result['candle_count']:,} paired confirmed 30m candles · {result['session_count']} complete sessions.")
+                    st.markdown("**1 · Composite auction structure**")
+                    a,b,c = st.columns(3)
+                    a.metric("Composite VAL", money(result["profile"]["VAL"]))
+                    b.metric("Composite POC", money(result["profile"]["POC"]))
+                    c.metric("Composite VAH", money(result["profile"]["VAH"]))
+                    a,b,c = st.columns(3)
+                    a.metric("Price high", money(result["price_high"]))
+                    b.metric("Price low", money(result["price_low"]))
+                    c.metric("Last close", money(result["last_close"]))
+                    st.caption(f"Composite TPOs: {result['profile']['TPOs']:,} · Occupied $50 rows: {result['profile']['Rows']:,}. Same dashboard research method; not Pine parity-certified.")
+                    st.markdown("**2 · OI behaviour · non-directional context**")
+                    a,b,c = st.columns(3)
+                    a.metric("Opening OI reference", f"{result['opening_oi']:,.3f} BTC")
+                    b.metric("Closing OI", f"{result['closing_oi']:,.3f} BTC")
+                    c.metric("Net OI change", f"{result['net_oi']:+,.3f} BTC", help="Outstanding OI change; it does not identify long/short direction.")
+                    a,b,c = st.columns(3)
+                    a.metric("OI increase candles", str(result["oi_up_count"]))
+                    b.metric("OI decrease candles", str(result["oi_down_count"]))
+                    c.metric("OI change %", f"{result['net_oi_pct']:+.2f}%" if result["net_oi_pct"] is not None else "—")
+                    st.caption(f"Positive OI changes: +{result['oi_positive_sum']:,.3f} BTC · Negative OI changes: {result['oi_negative_sum']:+,.3f} BTC. Descriptive only, not directional signals.")
+                    st.markdown("**3 · OI changes by composite auction location**")
+                    a,b,c = st.columns(3)
+                    a.metric("Above composite VAH", f"{result['oi_by_value']['above']:+,.3f} BTC")
+                    b.metric("Inside composite value", f"{result['oi_by_value']['inside']:+,.3f} BTC")
+                    c.metric("Below composite VAL", f"{result['oi_by_value']['below']:+,.3f} BTC")
+                    st.caption("Each close-to-close OI change is assigned by that candle's confirmed PRICE close relative to composite VAH/VAL. Buckets reconcile to net OI change.")
+                    st.markdown("**4 · Range containment against first selected session**")
+                    a,b,c = st.columns(3)
+                    a.metric("First-session high", money(result["first_session_high"]))
+                    b.metric("First-session low", money(result["first_session_low"]))
+                    c.metric("Candles fully inside", f"{result['candles_fully_inside_first_range']}/{result['candle_count']}")
+                    st.caption(f"Closes inside first-session range: {result['closes_inside_first_range']}/{result['candle_count']}. This is first-session high/low containment, not composite value containment.")
+                    st.markdown("**5 · Paired 30-minute history**")
+                    history = pd.DataFrame(result["history"])
+                    history["candle_time_ist"] = pd.to_datetime(history["candle_time"], utc=True).dt.tz_convert(IST)
+                    history["oi_change_btc"] = history["oi_change_btc"].round(6)
+                    st.dataframe(history[["candle_time_ist","price_close","oi_close","oi_change_btc"]], use_container_width=True, hide_index=True)
+
 now_utc = datetime.now(timezone.utc)
 live_session_start = utc_midnight(now_utc)
 available_dates = sorted({ts.date() for ts in price["candle_time"]}) if not price.empty else []
