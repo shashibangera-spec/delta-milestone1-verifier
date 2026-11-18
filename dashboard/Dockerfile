@@ -9,6 +9,7 @@ COPY dashboard/test_oi_attribution.py ./test_oi_attribution.py
 COPY dashboard/test_multi_day_research.py ./test_multi_day_research.py
 RUN python -m unittest discover -s . -p 'test_*.py' -v
 COPY dashboard/app.py ./app.py
+COPY dashboard/session_selection.py ./session_selection.py
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 EXPOSE 8080
