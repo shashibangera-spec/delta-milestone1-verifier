@@ -12,7 +12,7 @@ def _utc(value):
     return value.astimezone(UTC)
 
 
-def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, prior_val, prior_vah):
+def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, prior_val, prior_vah, require_complete_session=False):
     """Attribute each confirmed 30m OI close-to-close delta by that bar's confirmed PRICE close."""
     start = _utc(session_start)
     boundary_time = start - BAR
@@ -42,6 +42,11 @@ def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, 
     contiguous = sorted(current_oi) == expected
     complete_pairs = (timestamps_match and contiguous and bool(common_times)
                       and common_times[0] == start and common_times[-1] == latest_time)
+    if require_complete_session:
+        expected_count = 48
+        session_end = start + timedelta(days=1)
+        if len(current_oi) != expected_count or latest_time != session_end - BAR:
+            complete_pairs = False
     if not complete_pairs:
         reasons = []
         if not timestamps_match:
@@ -50,6 +55,8 @@ def calculate_value_area_oi_breakdown(price_candles, oi_candles, session_start, 
             reasons.append("A confirmed 30m slot is missing between the reset and latest OI candle.")
         if not common_times:
             reasons.append("No paired confirmed PRICE/OI candles are available.")
+        if require_complete_session and (len(current_oi) != 48 or latest_time != start + timedelta(days=1) - BAR):
+            reasons.append("Historical session is not a complete set of 48 confirmed 30m candles.")
         return {"valid": False, "reason": " ".join(reasons),
                 "prev_oi": prev_oi, "day_oi": day_oi, "above": None, "inside": None, "below": None,
                 "latest_oi": latest_oi, "candle_count": len(common_times), "discrepancy": None}
