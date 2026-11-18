@@ -22,16 +22,16 @@ def rows(start, count, price):
 class MultiDayResearchTests(unittest.TestCase):
     def setUp(self):
         self.price = rows(START, 144, True)
-        self.oi = [{"candle_time": START-timedelta(minutes=30), "close_value": 500.0}]
+        self.oi = [{"candle_time": START-timedelta(minutes=30), "close_value": 499.5}]
         self.oi += rows(START, 144, False)
 
     def test_three_complete_days(self):
         r = analyze_multi_day_range(self.price, self.oi, START, END)
         self.assertTrue(r["valid"], r["reason"])
         self.assertEqual((r["session_count"], r["candle_count"]), (3, 144))
-        self.assertEqual(r["opening_oi"], 500.0)
+        self.assertEqual(r["opening_oi"], 499.5)
         self.assertAlmostEqual(r["closing_oi"], 571.5)
-        self.assertAlmostEqual(r["net_oi"], 71.5)
+        self.assertAlmostEqual(r["net_oi"], 72.0)
         self.assertEqual(r["oi_up_count"], 144)
         self.assertEqual(len(r["history"]), 144)
         self.assertAlmostEqual(sum(r["oi_by_value"].values()), r["net_oi"])
