@@ -6,7 +6,6 @@ Run locally with the same DATABASE_URL value used by the dashboard:
 This script performs SELECTs only. It does not alter data or schema.
 """
 import os
-import re
 from datetime import timezone, timedelta
 from urllib.parse import urlparse
 
@@ -23,8 +22,8 @@ VERIFIED_ENDPOINT_BRANCHES = {
 
 def endpoint_id_from_url(database_url: str) -> str:
     host = urlparse(database_url).hostname or ""
-    host = host.removesuffix("-pooler")
-    return host.split(".", 1)[0]
+    endpoint = host.split(".", 1)[0]
+    return endpoint.removesuffix("-pooler")
 
 
 def fmt_ist(value) -> str:
@@ -84,7 +83,16 @@ def main() -> None:
                     count(DISTINCT candle_time) FILTER (
                         WHERE series_type = 'OI'
                     ) AS distinct_oi_slots,
-                    count(DISTINCT candle_time) AS total_distinct_slots
+                    count(DISTINCT candle_time) AS total_distinct_slots,
+                    count(DISTINCT candle_time) FILTER (
+                        WHERE candle_time IN (
+                            SELECT p.candle_time FROM candles p
+                            WHERE p.series_type = 'PRICE'
+                            INTERSECT
+                            SELECT o.candle_time FROM candles o
+                            WHERE o.series_type = 'OI'
+                        )
+                    ) AS paired_confirmed_slots
                 FROM candles
                 """
             )
@@ -94,7 +102,7 @@ def main() -> None:
     (
         database_name, role_name, server_address, session_start, checked_at,
         price_count, latest_price, oi_count, latest_oi,
-        distinct_price, distinct_oi, total_slots,
+        distinct_price, distinct_oi, total_slots, paired_slots,
     ) = row
 
     print("\nREAD-ONLY NEON DASHBOARD DIAGNOSTIC")
@@ -114,6 +122,7 @@ def main() -> None:
     print(f"Distinct PRICE slots:    {distinct_price}")
     print(f"Distinct OI slots:       {distinct_oi}")
     print(f"Distinct session slots:  {total_slots}")
+    print(f"Paired PRICE/OI slots:    {paired_slots}")
     print("\nNote: rows in research.delta_candles are confirmed history;")
     print("provisional candles are stored separately and are not counted.")
     print("Branch ID is shown only when the endpoint is in the verified map.\n")
