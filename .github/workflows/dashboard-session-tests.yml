@@ -5,6 +5,7 @@ on:
     branches:
       - milestone3-browser-dashboard
     paths:
+      - "dashboard/Dockerfile"
       - "dashboard/app.py"
       - "dashboard/session_selection.py"
       - "dashboard/test_session_selection.py"
@@ -28,6 +29,6 @@ jobs:
           python-version: "3.12"
       - name: Install test runner
         run: python -m pip install --upgrade pytest
-      - name: Run six session selector regression tests
+      - name: Run seven session selector regression tests
         working-directory: dashboard
         run: python -m pytest -q test_session_selection.py
