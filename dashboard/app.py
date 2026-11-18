@@ -208,7 +208,28 @@ breakdown = None
 if prior_profile:
     breakdown = calculate_value_area_oi_breakdown(candle_dicts(price_session), candle_dicts(oi), session_start, prior_profile["VAL"], prior_profile["VAH"], require_complete_session=not is_live)
 if breakdown is None:
-    st.warning("OI attribution unavailable until the confirmed Prior Day VAL and VAH profile is available.")
+    st.warning("Historical OI attribution unavailable: the retained data does not include a complete Prior Day profile and/or the exact 05:30 IST boundary OI candle. Missing values are intentionally not inferred.")
+    prev_col, day_col = st.columns(2)
+    prev_col.metric("PREV OI", "—")
+    day_col.metric("DAY OI", "—")
+    st.markdown("**Vertical Value & OI Breakup Ladder**")
+    with st.container(border=True):
+        st.markdown("**ABOVE VALUE**")
+        st.metric("Net OI above Prior VAH", "—")
+        st.divider()
+        st.markdown("**VALUE HIGH · Prior VAH**")
+        st.metric("Prior VAH", money(prior_profile["VAH"]) if prior_profile else "—")
+        st.divider()
+        st.markdown("**POC + INSIDE VALUE**")
+        poc_col, inside_col = st.columns(2)
+        poc_col.metric("Prior POC", money(prior_profile["POC"]) if prior_profile else "—")
+        inside_col.metric("Net OI inside Value", "—")
+        st.divider()
+        st.markdown("**VALUE LOW · Prior VAL**")
+        st.metric("Prior VAL", money(prior_profile["VAL"]) if prior_profile else "—")
+        st.divider()
+        st.markdown("**BELOW VALUE**")
+        st.metric("Net OI below Prior VAL", "—")
 else:
     prev_col, day_col = st.columns(2)
     prev_col.metric("PREV OI", f"{breakdown['prev_oi']:,.3f} BTC" if breakdown["prev_oi"] is not None else "—",
