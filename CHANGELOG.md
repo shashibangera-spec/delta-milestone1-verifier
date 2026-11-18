@@ -29,3 +29,8 @@
 - Preserve the independent custom date-range research selector and all existing AMT/OI calculations.
 - Add regression tests for Live default, historical selection persistence, custom-range independence, return-to-live behavior, invalid historical selection fallback, and live-only auto-refresh.
 - UI-only change; no collector, database, schema, AMT methodology, OI attribution, or production deployment changes.
+
+## Hotfix — include session selector helper in dashboard image
+- Copy `dashboard/session_selection.py` into the dashboard container at `/app/session_selection.py`, matching the import used by `app.py`.
+- Add a regression test that asserts the Dockerfile includes the helper module in the image.
+- No dashboard logic, data, collector, database, schema, Pine, or trading-rule changes.
