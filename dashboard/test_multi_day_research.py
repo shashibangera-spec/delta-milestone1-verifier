@@ -62,6 +62,12 @@ class MultiDayResearchTests(unittest.TestCase):
         self.assertFalse(r["valid"])
         self.assertIn("timestamps do not match", r["reason"])
 
+    def test_duplicate_timestamp_rejected(self):
+        duplicated = self.oi + [dict(self.oi[1])]
+        r = analyze_multi_day_range(self.price, duplicated, START, END)
+        self.assertFalse(r["valid"])
+        self.assertIn("Duplicate confirmed OI timestamps", r["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
