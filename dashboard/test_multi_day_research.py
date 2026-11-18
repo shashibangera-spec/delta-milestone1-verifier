@@ -52,9 +52,8 @@ class MultiDayResearchTests(unittest.TestCase):
         self.assertIn("boundary candle", r["reason"])
 
     def test_partial_session_range_rejected(self):
-        r = analyze_multi_day_range(self.price, self.oi, START, START+timedelta(days=2,hours=12))
-        self.assertFalse(r["valid"])
-        self.assertIn("whole UTC-day", r["reason"])
+        with self.assertRaisesRegex(ValueError, "end_exclusive must be UTC midnight"):
+            analyze_multi_day_range(self.price, self.oi, START, START+timedelta(days=2,hours=12))
 
     def test_unpaired_timestamp_rejected(self):
         broken = list(self.oi)
