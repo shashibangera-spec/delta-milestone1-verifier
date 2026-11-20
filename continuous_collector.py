@@ -114,6 +114,20 @@ def validate_historical_candle_baseline(candles):
             )
 
 
+def validate_incremental_series_integrity(totals):
+    """Fail closed on missing series, off-grid timestamps, or gaps in 30m history."""
+    for series_type in ("PRICE", "OI"):
+        actual = totals.get(series_type)
+        if actual is None:
+            raise RuntimeError(f"Missing incremental {series_type} series")
+        if actual["off_grid"] != 0:
+            raise RuntimeError(f"Off-grid {series_type} rows detected: {actual['off_grid']}")
+        if actual["grid_gaps"] != 0:
+            raise RuntimeError(
+                f"30-minute {series_type} timestamp gaps detected: {actual['grid_gaps']}"
+            )
+
+
 def baseline_snapshot(conn):
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("""
@@ -181,14 +195,12 @@ def verify_baseline_unchanged(conn, baseline):
             FROM ordered GROUP BY series_type
         """)
         totals={r["series_type"]:r for r in cur.fetchall()}
+    validate_incremental_series_integrity(totals)
     for series in ("PRICE","OI"):
         before,after=baseline["candles"][series],candle_rows.get(series)
         if not after or after["row_count"]!=before["row_count"] or after["checksum"]!=before["checksum"]:
             raise RuntimeError(f"Historical {series} rows changed: before={before}, after={after}")
-        if totals[series]["off_grid"]!=0:
-            raise RuntimeError(f"Off-grid {series} rows detected after first write")
-        if totals[series]["grid_gaps"]!=0:
-            raise RuntimeError(f"30-minute {series} timestamp gaps detected after first write: {totals[series]['grid_gaps']}")
+
     if feature_row["row_count"]!=baseline["features"]["row_count"] or feature_row["checksum"]!=baseline["features"]["checksum"]:
         raise RuntimeError("Existing amt_30m_features history changed")
     with conn.cursor(row_factory=dict_row) as cur:
