@@ -241,7 +241,13 @@ def verify_baseline_unchanged(conn, baseline):
 
 def existing_latest(conn):
     with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT series_type,MAX(candle_time) AS last_time FROM research.delta_candles GROUP BY series_type")
+        cur.execute("""
+            SELECT series_type,MAX(candle_time) AS last_time
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m'
+              AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            GROUP BY series_type
+        """)
         return {r["series_type"]:r["last_time"] for r in cur.fetchall()}
 
 def upsert_row(conn,symbol,series_type,candle,provisional=False):
@@ -321,7 +327,11 @@ def process_cycle(conn,baseline,first_write_verified):
         log("cycle_completed",paired_slots=len(paired),provisional_slots=len(provisional),confirmed_slots_seen=len(confirmed))
     if not first_write_verified:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM research.delta_candles WHERE candle_time > %s",(baseline["baseline_max"],))
+            cur.execute("""
+                SELECT COUNT(*) FROM research.delta_candles
+                WHERE source='delta_india' AND resolution='30m' AND candle_time > %s
+                  AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            """,(baseline["baseline_max"],))
             any_new_confirmed = cur.fetchone()[0] > 0
         if any_new_confirmed:
             result=verify_baseline_unchanged(conn,baseline)
