@@ -21,7 +21,7 @@
 
 - Separate the immutable 8,641-row PRICE/OI historical prefix (through 2026-11-17 00:00 UTC) from subsequently appended confirmed candles; startup no longer compares live table totals against the original baseline counts.
 - Pin the independently verified original PRICE/OI prefix checksums and UTC time range; startup fails closed if either historical prefix changes.
-- Keep the 1,800-row AMT feature history guard unchanged.
+- Keep the 1,800-row AMT feature history unchanged and pin its independently verified original time range and checksum as an additional startup integrity guard.
 - After the first new confirmed pair, verify historical checksums, PRICE/OI timestamp pairing, 30-minute grid alignment and continuity across each scoped series.
 - Add regression coverage for valid expanded live history, historical row-count/checksum/time-range corruption, missing series, off-grid candles and 30-minute gaps.
 - No Neon data, schema, Railway configuration or deployment changes are part of this correction.
