@@ -6,11 +6,15 @@ from continuous_collector import (
     EXPECTED_PRICE_ROWS,
     EXPECTED_OI_ROWS,
     EXPECTED_FEATURE_ROWS,
+    EXPECTED_FEATURE_START_UTC,
+    EXPECTED_FEATURE_MAX_UTC,
+    EXPECTED_FEATURE_BASELINE_CHECKSUM,
     EXPECTED_BASELINE_START_UTC,
     EXPECTED_BASELINE_MAX_UTC,
     EXPECTED_PRICE_BASELINE_CHECKSUM,
     EXPECTED_OI_BASELINE_CHECKSUM,
     validate_historical_candle_baseline,
+    validate_feature_baseline,
     validate_incremental_series_integrity,
 )
 
@@ -69,6 +73,23 @@ class CollectorSafetyTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RuntimeError, "time-range mismatch"):
             validate_historical_candle_baseline(changed)
+
+    def test_original_amt_feature_history_is_pinned(self):
+        validate_feature_baseline({
+            "row_count": EXPECTED_FEATURE_ROWS,
+            "first_time": EXPECTED_FEATURE_START_UTC,
+            "last_time": EXPECTED_FEATURE_MAX_UTC,
+            "checksum": EXPECTED_FEATURE_BASELINE_CHECKSUM,
+        })
+
+    def test_amt_feature_checksum_change_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "AMT feature baseline checksum mismatch"):
+            validate_feature_baseline({
+                "row_count": EXPECTED_FEATURE_ROWS,
+                "first_time": EXPECTED_FEATURE_START_UTC,
+                "last_time": EXPECTED_FEATURE_MAX_UTC,
+                "checksum": "tampered",
+            })
 
     def test_contiguous_incremental_price_and_oi_pass(self):
         validate_incremental_series_integrity({
