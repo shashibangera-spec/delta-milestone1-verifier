@@ -119,7 +119,12 @@ def validate_historical_candle_baseline(candles):
 
 def validate_feature_baseline(features):
     """Protect the separately frozen AMT feature history."""
-    validate_feature_baseline(features)
+    if features["row_count"] != EXPECTED_FEATURE_ROWS:
+        raise RuntimeError(f"AMT feature baseline row-count mismatch: {features}")
+    if features["first_time"] != EXPECTED_FEATURE_START_UTC or features["last_time"] != EXPECTED_FEATURE_MAX_UTC:
+        raise RuntimeError(f"AMT feature baseline time-range mismatch: {features}")
+    if features["checksum"] != EXPECTED_FEATURE_BASELINE_CHECKSUM:
+        raise RuntimeError(f"AMT feature baseline checksum mismatch: {features}")
 
 
 def validate_incremental_series_integrity(totals):
