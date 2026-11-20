@@ -117,6 +117,11 @@ def validate_historical_candle_baseline(candles):
             )
 
 
+def validate_feature_baseline(features):
+    """Protect the separately frozen AMT feature history."""
+    validate_feature_baseline(features)
+
+
 def validate_incremental_series_integrity(totals):
     """Fail closed on missing series, off-grid timestamps, or gaps in 30m history."""
     for series_type in ("PRICE", "OI"):
