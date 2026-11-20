@@ -25,6 +25,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 EXPECTED_PRICE_ROWS = 8641
 EXPECTED_OI_ROWS = 8641
 EXPECTED_FEATURE_ROWS = 1800
+EXPECTED_FEATURE_START_UTC = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+EXPECTED_FEATURE_MAX_UTC = datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)
+EXPECTED_FEATURE_BASELINE_CHECKSUM = "92672caee9d389c9fd0131723ba3bf23"
 EXPECTED_BASELINE_START_UTC = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
 EXPECTED_BASELINE_MAX_UTC = datetime(2026, 11, 17, 0, 0, tzinfo=timezone.utc)
 EXPECTED_PRICE_BASELINE_CHECKSUM = "34bd6fcf72967e1338ed0d1b174042c4"
@@ -152,7 +155,11 @@ def baseline_snapshot(conn):
         features = cur.fetchone()
     validate_historical_candle_baseline(candles)
     if features["row_count"] != EXPECTED_FEATURE_ROWS:
-        raise RuntimeError(f"AMT feature baseline count mismatch: {features}")
+        raise RuntimeError(f"AMT feature baseline row-count mismatch: {features}")
+    if features["first_time"] != EXPECTED_FEATURE_START_UTC or features["last_time"] != EXPECTED_FEATURE_MAX_UTC:
+        raise RuntimeError(f"AMT feature baseline time-range mismatch: {features}")
+    if features["checksum"] != EXPECTED_FEATURE_BASELINE_CHECKSUM:
+        raise RuntimeError(f"AMT feature baseline checksum mismatch: {features}")
     return {"candles":candles,"features":features,"baseline_max":EXPECTED_BASELINE_MAX_UTC}
 
 def verify_baseline_unchanged(conn, baseline):
