@@ -117,6 +117,13 @@ class CollectorSafetyTests(unittest.TestCase):
                 "OI": {"off_grid": 0, "grid_gaps": 0},
             })
 
+    def test_checksum_delimiter_uses_literal_backslash_n_in_sql(self):
+        import inspect
+        import continuous_collector
+
+        source = inspect.getsource(continuous_collector.baseline_snapshot)
+        self.assertIn("E'\\\\\\\\n'", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,3 +25,10 @@
 - After the first new confirmed pair, verify historical checksums, PRICE/OI timestamp pairing, 30-minute grid alignment and continuity across each scoped series.
 - Add regression coverage for valid expanded live history, historical row-count/checksum/time-range corruption, missing series, off-grid candles and 30-minute gaps.
 - No Neon data, schema, Railway configuration or deployment changes are part of this correction.
+
+
+## Neon collector checksum delimiter correction
+
+- Correct the SQL checksum separator escaping so PostgreSQL hashes the immutable historical PRICE, OI and AMT feature baselines using the same literal backslash-n separator used when the approved baseline checksums were generated.
+- Add a regression test to prevent the delimiter escaping from silently changing again.
+- No market data, database schema, Railway variables, or dashboard behavior changed.
