@@ -148,7 +148,10 @@ def verify_baseline_unchanged(conn, baseline):
                    md5(COALESCE(string_agg(concat_ws('|',id::text,source,symbol,series_type,resolution,
                      candle_time::text,open_value::text,high_value::text,low_value::text,close_value::text,
                      volume::text,raw_payload::text), E'\\n' ORDER BY candle_time,id),'')) AS checksum
-            FROM research.delta_candles WHERE candle_time <= %s GROUP BY series_type
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m' AND candle_time <= %s
+              AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            GROUP BY series_type
         """,(baseline["baseline_max"],))
         candle_rows={r["series_type"]:r for r in cur.fetchall()}
         cur.execute("""
