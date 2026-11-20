@@ -148,7 +148,7 @@ def baseline_snapshot(conn):
                    MAX(candle_time) AS last_time,
                    md5(COALESCE(string_agg(concat_ws('|',id::text,source,symbol,series_type,resolution,
                      candle_time::text,open_value::text,high_value::text,low_value::text,close_value::text,
-                     volume::text,raw_payload::text), E'\\n' ORDER BY candle_time,id),'')) AS checksum
+                     volume::text,raw_payload::text), E'\\\\n' ORDER BY candle_time,id),'')) AS checksum
             FROM research.delta_candles
             WHERE source='delta_india' AND resolution='30m' AND candle_time <= %s
               AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
@@ -159,7 +159,7 @@ def baseline_snapshot(conn):
             SELECT COUNT(*)::bigint AS row_count, MIN(candle_time) AS first_time, MAX(candle_time) AS last_time,
                    md5(COALESCE(string_agg(concat_ws('|',source,symbol,resolution,candle_time::text,
                      session_date::text,cycle_bar::text,cycle_status,price_open::text,price_high::text,
-                     price_low::text,price_close::text,feature_payload::text), E'\\n' ORDER BY candle_time),'')) AS checksum
+                     price_low::text,price_close::text,feature_payload::text), E'\\\\n' ORDER BY candle_time),'')) AS checksum
             FROM research.amt_30m_features
         """)
         features = cur.fetchone()
@@ -178,7 +178,7 @@ def verify_baseline_unchanged(conn, baseline):
             SELECT series_type, COUNT(*)::bigint AS row_count,
                    md5(COALESCE(string_agg(concat_ws('|',id::text,source,symbol,series_type,resolution,
                      candle_time::text,open_value::text,high_value::text,low_value::text,close_value::text,
-                     volume::text,raw_payload::text), E'\\n' ORDER BY candle_time,id),'')) AS checksum
+                     volume::text,raw_payload::text), E'\\\\n' ORDER BY candle_time,id),'')) AS checksum
             FROM research.delta_candles
             WHERE source='delta_india' AND resolution='30m' AND candle_time <= %s
               AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
@@ -189,7 +189,7 @@ def verify_baseline_unchanged(conn, baseline):
             SELECT COUNT(*)::bigint AS row_count,
                    md5(COALESCE(string_agg(concat_ws('|',source,symbol,resolution,candle_time::text,
                      session_date::text,cycle_bar::text,cycle_status,price_open::text,price_high::text,
-                     price_low::text,price_close::text,feature_payload::text), E'\\n' ORDER BY candle_time),'')) AS checksum
+                     price_low::text,price_close::text,feature_payload::text), E'\\\\n' ORDER BY candle_time),'')) AS checksum
             FROM research.amt_30m_features
         """)
         feature_row=cur.fetchone()
