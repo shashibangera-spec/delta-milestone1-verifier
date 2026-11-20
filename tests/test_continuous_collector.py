@@ -13,7 +13,6 @@ from continuous_collector import (
     EXPECTED_BASELINE_MAX_UTC,
     EXPECTED_PRICE_BASELINE_CHECKSUM,
     EXPECTED_OI_BASELINE_CHECKSUM,
-    CHECKSUM_DELIMITER_SQL,
     validate_historical_candle_baseline,
     validate_feature_baseline,
     validate_incremental_series_integrity,
@@ -118,11 +117,13 @@ class CollectorSafetyTests(unittest.TestCase):
                 "OI": {"off_grid": 0, "grid_gaps": 0},
             })
 
+    def test_checksum_delimiter_uses_literal_backslash_n_in_sql(self):
+        import inspect
+        import continuous_collector
+
+        source = inspect.getsource(continuous_collector.baseline_snapshot)
+        self.assertIn("E'\\\\\\\\n'", source)
+
 
 if __name__ == "__main__":
     unittest.main()
-
-    def test_checksum_delimiter_is_literal_backslash_n(self):
-        # PostgreSQL must hash rows separated by the two characters \\ and n,
-        # matching the independently verified baseline checksum convention.
-        self.assertEqual(CHECKSUM_DELIMITER_SQL, "E'\\\\n'")
