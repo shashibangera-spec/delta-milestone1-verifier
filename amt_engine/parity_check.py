@@ -1,4 +1,4 @@
-"""Read-only historical parity checker. Never writes to either Neon branch."""
+"""Read-only historical parity checker. Full-session preflight precedes every comparison; never writes to Neon."""
 from __future__ import annotations
 
 import json
