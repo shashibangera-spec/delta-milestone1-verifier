@@ -79,6 +79,9 @@ class DailyEngineTests(unittest.TestCase):
     def test_option_a_persists_zero_count_candidates(self):
         # Wide, sparse profile creates interior empty candidates; all rows are retained.
         raw = self.rows(Decimal('0'), Decimal('50'))
+        for row in raw[:24]:
+            row['open_value'] = '25'
+            row['close_value'] = '25'
         for row in raw[24:]:
             row['low_value'] = '450'
             row['high_value'] = '500'
@@ -93,7 +96,11 @@ class DailyEngineTests(unittest.TestCase):
 
     def test_poc_and_va_ties_choose_lower_price(self):
         # Every row has equal TPO count; POC must be lowest bucket.
-        validated = validate_session(self.day, self.rows(Decimal('0'), Decimal('100')))
+        raw = self.rows(Decimal('0'), Decimal('100'))
+        for row in raw:
+            row['open_value'] = '50'
+            row['close_value'] = '50'
+        validated = validate_session(self.day, raw)
         profile, rows = calculate_profile(self.day, validated.candles)
         self.assertEqual(profile.poc_lower, Decimal('0'))
         self.assertTrue(rows[0].is_value_area)
