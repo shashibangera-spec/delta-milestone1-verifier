@@ -1,7 +1,7 @@
 """Read-only historical parity checker. Never writes to either Neon branch."""
 from __future__ import annotations
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import psycopg
 from psycopg.rows import dict_row
@@ -34,19 +34,19 @@ def run_parity():
         calculated_rows = 0
         for ref in profiles:
             day = ref['session_date']
+            start_utc = datetime.combine(day, time.min, tzinfo=timezone.utc)
+            end_utc = start_utc + timedelta(days=1)
             with live.cursor() as cur:
                 cur.execute('''SELECT candle_time,open_value,high_value,low_value,close_value
                   FROM research.delta_candles
                   WHERE source=%s AND symbol=%s AND series_type='PRICE' AND resolution=%s
-                    AND candle_time >= (%s::date)::timestamptz
-                    AND candle_time < ((%s::date + INTERVAL '1 day')::timestamptz)
-                  ORDER BY candle_time''', (SOURCE,SYMBOL,RESOLUTION,day,day))
+                    AND candle_time >= %s AND candle_time < %s
+                  ORDER BY candle_time''', (SOURCE,SYMBOL,RESOLUTION,start_utc,end_utc))
                 raw = cur.fetchall()
                 cur.execute('''SELECT candle_time FROM research.delta_candles_provisional
                   WHERE source=%s AND symbol=%s AND series_type='PRICE' AND resolution=%s
-                    AND candle_time >= (%s::date)::timestamptz
-                    AND candle_time < ((%s::date + INTERVAL '1 day')::timestamptz)''',
-                    (SOURCE,SYMBOL,RESOLUTION,day,day))
+                    AND candle_time >= %s AND candle_time < %s''',
+                    (SOURCE,SYMBOL,RESOLUTION,start_utc,end_utc))
                 provisional = [r['candle_time'] for r in cur.fetchall()]
             validated = validate_session(day, raw, provisional)
             if not validated.valid:
