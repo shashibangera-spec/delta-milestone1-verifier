@@ -37,6 +37,15 @@ def validate_target_environment(database_url: str | None, project_id: str | None
         raise RuntimeError('DATABASE_URL hostname does not match the approved AMT research endpoint')
 
 
+def validate_session_closed(session_date: date, now: datetime | None = None) -> None:
+    """Prevent any calculation until the full UTC session has ended."""
+    _, session_end = (datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc),
+                      datetime.combine(session_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None or current.astimezone(timezone.utc) < session_end:
+        raise RuntimeError('Requested UTC session is not fully closed; calculation was not started')
+
+
 def verify_runtime_identity(conn) -> dict:
     """Verify identity on the exact connection used for source reads and output writes."""
     with conn.cursor(row_factory=dict_row) as cur:
@@ -165,6 +174,7 @@ def main():
     parser.add_argument('--session-date', help='UTC session date YYYY-MM-DD; defaults to the last fully closed UTC session')
     args=parser.parse_args()
     day=date.fromisoformat(args.session_date) if args.session_date else datetime.now(timezone.utc).date()-timedelta(days=1)
+    validate_session_closed(day)
     url=os.environ.get('DATABASE_URL')
     validate_target_environment(url, os.environ.get('NEON_PROJECT_ID'),
                                os.environ.get('NEON_BRANCH_ID'), os.environ.get('NEON_DATABASE_NAME'))
