@@ -1,6 +1,9 @@
 name: AMT Engine Historical Parity (Manual)
 
 on:
+  push:
+    branches:
+      - feat/amt-engine-daily-v1-corrected
   workflow_dispatch:
     inputs:
       execute_parity:
@@ -17,9 +20,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  offline-tests:
+    name: Offline parity tests (no database credentials)
+    if: github.ref == 'refs/heads/feat/amt-engine-daily-v1-corrected'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/amt-engine-daily-v1-corrected
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run offline parity tests
+        run: python -m unittest tests.test_amt_engine_parity_check -v
+
+      - name: Compile AMT engine and tests
+        run: python -m compileall -q amt_engine tests
+
   historical-parity:
     name: Historical parity (read-only)
     if: >-
+      github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/feat/amt-engine-daily-v1-corrected' &&
       inputs.execute_parity == true
     runs-on: ubuntu-latest
