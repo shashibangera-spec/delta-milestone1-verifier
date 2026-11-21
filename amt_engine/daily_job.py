@@ -13,7 +13,7 @@ from amt_engine.daily import (METHOD_VERSION, SOURCE, SYMBOL, RESOLUTION, valida
 
 def process_session(conn, session_date: date):
     run_id = uuid.uuid4()
-n    with conn.cursor(row_factory=dict_row) as cur:
+    with conn.cursor(row_factory=dict_row) as cur:
         # Serialize writers for one session/method without locking raw collector tables.
         cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}",))
         start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
