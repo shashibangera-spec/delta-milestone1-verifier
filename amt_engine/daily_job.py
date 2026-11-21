@@ -12,10 +12,21 @@ from amt_engine.daily import (METHOD_VERSION, SOURCE, SYMBOL, RESOLUTION, valida
 
 
 def process_session(conn, session_date: date):
+    lock_key = f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}"
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_lock(hashtext(%s))", (lock_key,))
+    conn.commit()
+    try:
+        return _process_session_locked(conn, session_date)
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (lock_key,))
+        conn.commit()
+
+
+def _process_session_locked(conn, session_date: date):
     run_id = uuid.uuid4()
     with conn.cursor(row_factory=dict_row) as cur:
-        # Serialize writers for one session/method without locking raw collector tables.
-        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}",))
         start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
         end = start + timedelta(days=1)
         cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value
