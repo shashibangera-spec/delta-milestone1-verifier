@@ -185,6 +185,12 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
     expected_times = [start + timedelta(seconds=BAR_SECONDS * i) for i in range(EXPECTED_BARS)]
     if [c.candle_time for c in bars] != expected_times:
         raise ValueError("candles must match all 48 exact session timestamps")
+    for candle in bars:
+        values = (candle.open, candle.high, candle.low, candle.close)
+        if any(not isinstance(v, Decimal) or not v.is_finite() for v in values):
+            raise ValueError("all OHLC values must be finite Decimal values")
+        if candle.high < candle.low or candle.high < max(candle.open, candle.close) or candle.low > min(candle.open, candle.close):
+            raise ValueError("OHLC ordering invalid")
 
     counts: dict[int, int] = {}
     for candle in bars:
