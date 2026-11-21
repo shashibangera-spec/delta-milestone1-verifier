@@ -133,7 +133,9 @@ jobs:
 
   historical-parity:
     name: Historical parity (read-only)
+    needs: [connection-identity-preflight]
     if: >-
+      needs.connection-identity-preflight.result == 'success' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/feat/amt-engine-daily-v1-corrected' &&
       inputs.execute_parity == true
