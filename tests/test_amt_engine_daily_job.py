@@ -40,7 +40,10 @@ class FakeCursor:
 
     def execute(self, sql, params=None):
         sql = " ".join(sql.split())
-        if "FROM research.delta_candles_provisional" in sql:
+        if "SELECT current_database() AS database_name" in sql:
+            self.one = self.conn.identity
+            self.rows = []
+        elif "FROM research.delta_candles_provisional" in sql:
             self.rows, self.one = [], None
         elif "FROM research.delta_candles" in sql:
             self.rows, self.one = self.conn.raw, None
@@ -73,11 +76,12 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, raw=None, latest_success=None, prior_attempts=None, fail_tpo_insert=False):
+    def __init__(self, raw=None, latest_success=None, prior_attempts=None, fail_tpo_insert=False, identity=None):
         self.raw = make_raw() if raw is None else raw
         self.latest_success = latest_success
         self.prior_attempts = prior_attempts or []
         self.fail_tpo_insert = fail_tpo_insert
+        self.identity = identity or {"database_name": "amt_research", "current_user": "amt_engine_writer", "session_user": "amt_engine_writer"}
         self.run_inserts = []
         self.profile_inserts = []
         self.tpo_inserts = []
@@ -112,6 +116,7 @@ class DailyWriterTests(unittest.TestCase):
         self.assertEqual(len(conn.profile_inserts), 1)
         self.assertGreater(len(conn.tpo_inserts), 0)
         self.assertEqual(conn.status_updates[-1][0], "SUCCEEDED")
+        self.assertEqual(conn.run_inserts[0][20].get("runtime_audit") if isinstance(conn.run_inserts[0][20], dict) else None, None)
         self.assertEqual(conn.rollback_count, 0)
 
     def test_rejected_input_records_attempt_without_profile_or_tpo_output(self):
@@ -153,15 +158,16 @@ class DailyWriterTests(unittest.TestCase):
         self.assertEqual(changed.run_inserts[0][6:9], (3, 1, "RESTATEMENT"))
 
     def test_branch_and_hostname_guard_fails_closed(self):
-        valid_url = "postgresql://user:pass@" + sorted(daily_job.EXPECTED_NEON_HOSTS)[0] + "/db"
-        daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_BRANCH_ID)
+        valid_url = "postgresql://user:pass@" + sorted(daily_job.EXPECTED_NEON_HOSTS)[0] + "/amt_research"
+        daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_PROJECT_ID,
+                                              daily_job.EXPECTED_NEON_BRANCH_ID, daily_job.EXPECTED_DATABASE_NAME)
         with self.assertRaisesRegex(RuntimeError, "NEON_BRANCH_ID"):
-            daily_job.validate_target_environment(valid_url, "wrong-branch")
+            daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_PROJECT_ID, "wrong-branch", daily_job.EXPECTED_DATABASE_NAME)
         with self.assertRaisesRegex(RuntimeError, "hostname"):
             daily_job.validate_target_environment("postgresql://user:pass@unapproved.example/db",
-                                                  daily_job.EXPECTED_NEON_BRANCH_ID)
+                                                  daily_job.EXPECTED_NEON_PROJECT_ID, daily_job.EXPECTED_NEON_BRANCH_ID, daily_job.EXPECTED_DATABASE_NAME)
         with self.assertRaisesRegex(RuntimeError, "DATABASE_URL"):
-            daily_job.validate_target_environment(None, daily_job.EXPECTED_NEON_BRANCH_ID)
+            daily_job.validate_target_environment(None, daily_job.EXPECTED_NEON_PROJECT_ID, daily_job.EXPECTED_NEON_BRANCH_ID, daily_job.EXPECTED_DATABASE_NAME)
 
 
 if __name__ == "__main__":
