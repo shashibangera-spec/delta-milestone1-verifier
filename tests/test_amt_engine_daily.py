@@ -78,7 +78,12 @@ class DailyEngineTests(unittest.TestCase):
 
     def test_option_a_persists_zero_count_candidates(self):
         # Wide, sparse profile creates interior empty candidates; all rows are retained.
-        raw = self.rows(Decimal('0'), Decimal('500'))
+        raw = self.rows(Decimal('0'), Decimal('50'))
+        for row in raw[24:]:
+            row['low_value'] = '450'
+            row['high_value'] = '500'
+            row['open_value'] = '475'
+            row['close_value'] = '475'
         validated = validate_session(self.day, raw)
         profile, rows = calculate_profile(self.day, validated.candles)
         self.assertTrue(any(r.tpo_count == 0 for r in rows))
