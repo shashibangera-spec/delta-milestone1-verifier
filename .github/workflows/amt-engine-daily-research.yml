@@ -23,7 +23,9 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.AMT_ENGINE_DATABASE_URL }}
       SESSION_DATE: ${{ inputs.session_date }}
+      NEON_PROJECT_ID: old-surf-34279165
       NEON_BRANCH_ID: br-lingering-grass-ao07mgrx
+      NEON_DATABASE_NAME: amt_research
     steps:
       - name: Check out approved feature branch
         uses: actions/checkout@v4
