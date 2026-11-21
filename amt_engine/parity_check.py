@@ -23,11 +23,30 @@ class ParityPreflightError(RuntimeError):
 
 
 def _connect_readonly(url):
+    """Open a connection with an explicitly read-only transaction before any data query."""
     if not url:
         raise RuntimeError("Both LIVE_DATABASE_URL and REFERENCE_DATABASE_URL are required")
-    return psycopg.connect(
+
+    conn = psycopg.connect(
         url, options="-c default_transaction_read_only=on", row_factory=dict_row
     )
+    try:
+        # This must be the first command in the implicit transaction. Once a query has
+        # run, PostgreSQL will not allow this transaction's access mode to be changed.
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+            cur.execute("SHOW transaction_read_only")
+            state = cur.fetchone()
+        if not state or str(state.get("transaction_read_only", "")).lower() not in {
+            "on", "true", "1"
+        }:
+            raise RuntimeError("PostgreSQL did not confirm a read-only transaction")
+        return conn
+    except Exception as exc:
+        conn.close()
+        raise RuntimeError(
+            "Could not establish and verify a read-only database transaction"
+        ) from exc
 
 
 def validate_all_reference_sessions(profiles, fetch_inputs):
