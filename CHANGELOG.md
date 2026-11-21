@@ -32,3 +32,12 @@
 - Correct the SQL checksum separator escaping so PostgreSQL hashes the immutable historical PRICE, OI and AMT feature baselines using the same literal backslash-n separator used when the approved baseline checksums were generated.
 - Add a regression test to prevent the delimiter escaping from silently changing again.
 - No market data, database schema, Railway variables, or dashboard behavior changed.
+
+
+## AMT Engine V1 daily calculation preparation
+- Added a standalone daily AMT calculation package for the Neon research project; collector and live dashboard remain untouched.
+- Enforced 48 exact 30-minute UTC candles per session (00:00 UTC / 05:30 IST), strict timestamp/OHLC/duplicate/provisional validation, and no final profile on invalid input.
+- Implemented zero-origin $50 TPO rows, exact-boundary higher-row assignment, lower-price POC and VA tie-breaks, and Option A zero-count VA expansion candidates.
+- Separated revision numbers from execution attempt numbers; unchanged-input retries stay in the same revision and unavailable fingerprints remain NULL.
+- Added a read-only historical parity utility for all 183 completed profiles and 8,113 reference TPO rows. Historical session assignment remains CONDITIONAL.
+- Added a review-only SQL migration. No SQL, Neon permission, Railway, deployment, dashboard, or validation-branch changes were performed.
