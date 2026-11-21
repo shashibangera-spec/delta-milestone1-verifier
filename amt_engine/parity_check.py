@@ -54,11 +54,11 @@ def run_parity():
                 continue
             calc, calc_rows = calculate_profile(day, validated.candles)
             calculated_profiles += 1
-            fields = ('expected_bars','observed_bars','is_complete','missing_candle_count','total_tpos',
+            fields = ('expected_bars','observed_bars','is_complete','missing_candle_count','first_candle','last_candle','total_tpos',
                       'poc_lower','poc_upper','poc_tpo_count','vah_lower','vah_upper','val_lower','val_upper','value_area_tpos')
             calculated = {'expected_bars':calc.expected_bars,'observed_bars':calc.observed_bars,
                 'is_complete':calc.is_complete,'missing_candle_count':calc.missing_candle_count,
-                'total_tpos':calc.total_tpos,'poc_lower':calc.poc_lower,'poc_upper':calc.poc_upper,
+                'first_candle':calc.first_candle,'last_candle':calc.last_candle,'total_tpos':calc.total_tpos,'poc_lower':calc.poc_lower,'poc_upper':calc.poc_upper,
                 'poc_tpo_count':calc.poc_tpo_count,'vah_lower':calc.vah_lower,'vah_upper':calc.vah_upper,
                 'val_lower':calc.val_lower,'val_upper':calc.val_upper,'value_area_tpos':calc.value_area_tpos}
             for field in fields:
