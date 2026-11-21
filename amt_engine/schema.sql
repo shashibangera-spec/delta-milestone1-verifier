@@ -87,14 +87,14 @@ CREATE INDEX daily_tpo_rows_run_value_idx ON amt_engine.daily_tpo_rows(run_id,is
 
 -- Least-privilege grants applied to dedicated login role amt_engine_writer.
 GRANT USAGE ON SCHEMA research TO amt_engine_writer;
--- GRANT SELECT (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value)
+GRANT SELECT (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value)
   ON research.delta_candles TO amt_engine_writer;
--- GRANT SELECT (source,symbol,series_type,resolution,candle_time,status)
---   ON research.delta_candles_provisional TO amt_engine_writer;
--- GRANT USAGE ON SCHEMA amt_engine TO amt_engine_writer;
--- GRANT SELECT,INSERT ON amt_engine.calculation_runs TO amt_engine_writer;
--- GRANT UPDATE (execution_status,calculated_at,validation_report) ON amt_engine.calculation_runs TO amt_engine_writer;
--- GRANT SELECT,INSERT ON amt_engine.daily_profiles TO amt_engine_writer;
--- GRANT SELECT,INSERT ON amt_engine.daily_tpo_rows TO amt_engine_writer;
+GRANT SELECT (source,symbol,series_type,resolution,candle_time)
+  ON research.delta_candles_provisional TO amt_engine_writer;
+GRANT USAGE ON SCHEMA amt_engine TO amt_engine_writer;
+GRANT SELECT,INSERT ON amt_engine.calculation_runs TO amt_engine_writer;
+GRANT UPDATE (execution_status,calculated_at,validation_report) ON amt_engine.calculation_runs TO amt_engine_writer;
+GRANT SELECT,INSERT ON amt_engine.daily_profiles TO amt_engine_writer;
+GRANT SELECT,INSERT ON amt_engine.daily_tpo_rows TO amt_engine_writer;
 -- No UPDATE/DELETE/TRUNCATE privileges on daily_profiles or daily_tpo_rows.
 -- calculation_runs UPDATE is column-scoped to execution_status, calculated_at, validation_report.
