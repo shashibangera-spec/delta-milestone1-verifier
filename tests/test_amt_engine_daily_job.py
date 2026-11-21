@@ -117,7 +117,7 @@ class DailyWriterTests(unittest.TestCase):
         self.assertEqual(len(conn.profile_inserts), 1)
         self.assertGreater(len(conn.tpo_inserts), 0)
         self.assertEqual(conn.status_updates[-1][0], "SUCCEEDED")
-        audit = json.loads(conn.run_inserts[0][20])["runtime_audit"]
+        audit = json.loads(conn.run_inserts[0][19])["runtime_audit"]
         self.assertEqual(audit["current_user"], "amt_engine_writer")
         self.assertEqual(audit["session_user"], "amt_engine_writer")
         self.assertEqual(audit["neon_branch_id"], daily_job.EXPECTED_NEON_BRANCH_ID)
