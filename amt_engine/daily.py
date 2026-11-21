@@ -91,6 +91,12 @@ def _normalize_timestamp(value) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _canonical_decimal(value: Decimal) -> str:
+    """Stable fixed-point representation: 1.0, 1.00 and 1 normalize identically."""
+    normalized = value.normalize()
+    return "0" if normalized == 0 else format(normalized, "f")
+
+
 def _canonical_fingerprint(candles: Iterable[Candle]) -> str:
     payload = {
         "format": "amt-price-ohlc-v1",
@@ -98,8 +104,10 @@ def _canonical_fingerprint(candles: Iterable[Candle]) -> str:
         "source": SOURCE,
         "symbol": SYMBOL,
         "resolution": RESOLUTION,
+        "series_type": "PRICE",
         "rows": [
-            [c.candle_time.isoformat(), str(c.open), str(c.high), str(c.low), str(c.close)]
+            [c.candle_time.isoformat(), _canonical_decimal(c.open), _canonical_decimal(c.high),
+             _canonical_decimal(c.low), _canonical_decimal(c.close)]
             for c in sorted(candles, key=lambda x: x.candle_time)
         ],
     }
@@ -201,14 +209,12 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
         raise ValueError("no TPO rows generated")
 
     min_bucket, max_bucket = min(counts), max(counts)
-    # POC tie: lower price wins.
     poc_bucket = min(counts, key=lambda b: (-counts[b], b))
     total_tpos = sum(counts.values())
     target = int((Decimal(total_tpos) * VALUE_AREA_FRACTION).to_integral_value(rounding=ROUND_CEILING))
     selected = {poc_bucket}
     value_count = counts[poc_bucket]
     low_edge = high_edge = poc_bucket
-    # Option A: absent rows inside occupied profile extremes are zero-count candidates.
     while value_count < target:
         candidates = []
         if low_edge > min_bucket:
@@ -217,7 +223,6 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
             candidates.append((counts.get(high_edge + 1, 0), high_edge + 1))
         if not candidates:
             break
-        # Highest adjacent count; lower-price candidate wins ties, including 0 vs 0.
         chosen_count, chosen_bucket = min(candidates, key=lambda item: (-item[0], item[1]))
         selected.add(chosen_bucket)
         value_count += chosen_count
