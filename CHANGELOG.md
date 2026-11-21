@@ -41,3 +41,11 @@
 - Separated revision numbers from execution attempt numbers; unchanged-input retries stay in the same revision and unavailable fingerprints remain NULL.
 - Added a read-only historical parity utility for all 183 completed profiles and 8,113 reference TPO rows. Historical session assignment remains CONDITIONAL.
 - Added a review-only SQL migration. No SQL, Neon permission, Railway, deployment, dashboard, or validation-branch changes were performed.
+
+
+## AMT Engine V1.0 daily writer foundation
+- Applied the three-table `amt_engine` schema to the dedicated Neon research branch `br-lingering-grass-ao07mgrx`.
+- Created `amt_engine_writer` with schema-scoped access; granted SELECT on only the required source columns and SELECT/INSERT on AMT outputs, plus column-limited status updates on calculation runs.
+- Verified source INSERT is denied, unapproved source columns are not selectable, and output DELETE is denied. Existing read-only identities were not modified.
+- Added a manually triggered research-branch daily execution workflow; it requires the repository secret `AMT_ENGINE_DATABASE_URL` and does not deploy or run automatically.
+- Historical parity evidence and conditional session-assignment qualification remain unchanged.
