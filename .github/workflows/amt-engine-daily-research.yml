@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 15
     env:
       DATABASE_URL: ${{ secrets.AMT_ENGINE_DATABASE_URL }}
+      SESSION_DATE: ${{ inputs.session_date }}
       NEON_BRANCH_ID: br-lingering-grass-ao07mgrx
     steps:
       - name: Check out approved feature branch
@@ -46,8 +47,8 @@ jobs:
           fi
       - name: Execute one UTC session
         run: |
-          if [ -n "${{ inputs.session_date }}" ]; then
-            python -m amt_engine.daily_job --session-date "${{ inputs.session_date }}"
+          if [ -n "${SESSION_DATE}" ]; then
+            python -m amt_engine.daily_job --session-date "${SESSION_DATE}"
           else
             python -m amt_engine.daily_job
           fi
