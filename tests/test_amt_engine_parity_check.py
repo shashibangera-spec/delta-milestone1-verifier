@@ -2,10 +2,14 @@
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
+
+import amt_engine.parity_check as parity_check
 
 from amt_engine.daily import BAR_SECONDS, EXPECTED_BARS, session_bounds, validate_session, calculate_profile
 from amt_engine.parity_check import (
     ParityPreflightError, validate_all_reference_sessions, compare_session,
+    _connect_readonly,
 )
 
 
@@ -21,6 +25,61 @@ def make_raw(day, count=EXPECTED_BARS):
         }
         for i in range(count)
     ]
+
+
+class ReadOnlyConnectionTests(unittest.TestCase):
+    class FakeCursor:
+        def __init__(self, state="on"):
+            self.commands = []
+            self.state = state
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql):
+            self.commands.append(sql)
+
+        def fetchone(self):
+            return {"transaction_read_only": self.state}
+
+    class FakeConnection:
+        def __init__(self, state="on"):
+            self.cursor_instance = ReadOnlyConnectionTests.FakeCursor(state)
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def close(self):
+            self.closed = True
+
+    def test_explicit_read_only_transaction_is_first_command_and_verified(self):
+        connection = self.FakeConnection()
+        with patch.object(parity_check.psycopg, "connect", return_value=connection) as connect:
+            result = _connect_readonly("postgresql://offline-test")
+        self.assertIs(result, connection)
+        self.assertEqual(
+            connection.cursor_instance.commands,
+            ["SET TRANSACTION READ ONLY", "SHOW transaction_read_only"],
+        )
+        self.assertEqual(connect.call_args.kwargs["options"],
+                         "-c default_transaction_read_only=on")
+
+    def test_connection_is_closed_if_read_only_cannot_be_verified(self):
+        connection = self.FakeConnection(state="off")
+        with patch.object(parity_check.psycopg, "connect", return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, "read-only database transaction"):
+                _connect_readonly("postgresql://offline-test")
+        self.assertTrue(connection.closed)
+
+    def test_missing_url_fails_before_connecting(self):
+        with patch.object(parity_check.psycopg, "connect") as connect:
+            with self.assertRaisesRegex(RuntimeError, "Both LIVE_DATABASE_URL"):
+                _connect_readonly(None)
+        connect.assert_not_called()
 
 
 class ParityPreflightTests(unittest.TestCase):
