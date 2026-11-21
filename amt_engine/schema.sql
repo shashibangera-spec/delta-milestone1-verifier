@@ -63,7 +63,10 @@ CREATE TABLE amt_engine.daily_profiles (
     CHECK (session_high >= session_low AND session_high >= GREATEST(session_open,session_close)
        AND session_low <= LEAST(session_open,session_close)),
     CHECK (val_lower <= poc_lower AND val_upper <= poc_upper
-       AND poc_lower <= vah_lower AND poc_upper <= vah_upper)
+       AND poc_lower <= vah_lower AND poc_upper <= vah_upper),
+    CHECK (poc_upper = poc_lower + 50 AND mod(poc_lower,50) = 0),
+    CHECK (vah_upper = vah_lower + 50 AND mod(vah_lower,50) = 0),
+    CHECK (val_upper = val_lower + 50 AND mod(val_lower,50) = 0)
 );
 CREATE INDEX daily_profiles_session_idx
   ON amt_engine.daily_profiles(session_date,method_version,source,symbol);
