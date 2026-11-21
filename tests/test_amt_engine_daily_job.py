@@ -44,7 +44,7 @@ class FakeCursor:
             self.rows, self.one = [], None
         elif "FROM research.delta_candles" in sql:
             self.rows, self.one = self.conn.raw, None
-        elif "execution_status='SUCCEEDED'" in sql:
+        elif "SELECT revision_number,input_fingerprint,run_id" in sql:
             self.rows, self.one = [], self.conn.latest_success
         elif "SELECT revision_number,attempt_number" in sql:
             self.rows, self.one = self.conn.prior_attempts, None
