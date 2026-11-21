@@ -27,6 +27,13 @@ class DailyEngineTests(unittest.TestCase):
         self.assertEqual(len(result.candles), 48)
         self.assertEqual(len(result.input_fingerprint), 64)
 
+    def test_fingerprint_normalizes_decimal_scale_and_identifies_price_series(self):
+        from amt_engine.daily import _canonical_fingerprint
+        ts = self.start
+        a = [Candle(ts, Decimal("1.0"), Decimal("2.00"), Decimal("0.00"), Decimal("1.000"))]
+        b = [Candle(ts, Decimal("1"), Decimal("2"), Decimal("0"), Decimal("1"))]
+        self.assertEqual(_canonical_fingerprint(a), _canonical_fingerprint(b))
+
     def test_missing_candle_rejected_without_fingerprint(self):
         result = validate_session(self.day, self.rows()[:-1])
         self.assertFalse(result.valid)
@@ -77,7 +84,6 @@ class DailyEngineTests(unittest.TestCase):
         self.assertEqual([r.row_lower for r in rows], [Decimal('100'), Decimal('150')])
 
     def test_option_a_persists_zero_count_candidates(self):
-        # Wide, sparse profile creates interior empty candidates; all rows are retained.
         raw = self.rows(Decimal('0'), Decimal('50'))
         for row in raw[:24]:
             row['open_value'] = '25'
@@ -95,7 +101,6 @@ class DailyEngineTests(unittest.TestCase):
         self.assertEqual(sum(r.tpo_count for r in rows), profile.total_tpos)
 
     def test_poc_and_va_ties_choose_lower_price(self):
-        # Every row has equal TPO count; POC must be lowest bucket.
         raw = self.rows(Decimal('0'), Decimal('100'))
         for row in raw:
             row['open_value'] = '50'
