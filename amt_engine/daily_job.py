@@ -8,7 +8,10 @@ from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
 import psycopg
 from psycopg.rows import dict_row
+EXPECTED_NEON_PROJECT_ID = 'old-surf-34279165'
 EXPECTED_NEON_BRANCH_ID = 'br-lingering-grass-ao07mgrx'
+EXPECTED_DATABASE_NAME = 'amt_research'
+EXPECTED_DATABASE_ROLE = 'amt_engine_writer'
 EXPECTED_NEON_HOSTS = {
     'ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech',
     'ep-sparkling-queen-aoqgp0mw-pooler.c-2.ap-southeast-1.aws.neon.tech',
@@ -18,31 +21,57 @@ from amt_engine.daily import (METHOD_VERSION, SOURCE, SYMBOL, RESOLUTION, valida
     calculate_profile, assign_revision_attempt)
 
 
-def validate_target_environment(database_url: str | None, branch_id: str | None) -> None:
-    """Fail closed before any connection unless the explicitly approved target matches."""
+def validate_target_environment(database_url: str | None, project_id: str | None,
+                                branch_id: str | None, database_name: str | None) -> None:
+    """Fail closed before connecting unless all approved target identifiers match."""
     if not database_url:
         raise RuntimeError('DATABASE_URL is required')
+    if project_id != EXPECTED_NEON_PROJECT_ID:
+        raise RuntimeError('NEON_PROJECT_ID does not match the approved AMT research project')
     if branch_id != EXPECTED_NEON_BRANCH_ID:
         raise RuntimeError('NEON_BRANCH_ID does not match the approved AMT research branch')
+    if database_name != EXPECTED_DATABASE_NAME:
+        raise RuntimeError('NEON_DATABASE_NAME does not match the approved AMT research database')
     host = urlparse(database_url).hostname
     if host not in EXPECTED_NEON_HOSTS:
         raise RuntimeError('DATABASE_URL hostname does not match the approved AMT research endpoint')
 
 
+def verify_runtime_identity(conn) -> dict:
+    """Verify identity on the exact connection used for source reads and output writes."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT current_database() AS database_name, current_user AS current_user, session_user AS session_user")
+        identity = cur.fetchone()
+    if (not identity or identity.get('database_name') != EXPECTED_DATABASE_NAME
+            or identity.get('current_user') != EXPECTED_DATABASE_ROLE
+            or identity.get('session_user') != EXPECTED_DATABASE_ROLE):
+        # Do not include connection details or raw server errors in this failure.
+        raise RuntimeError('Runtime database identity check failed; expected approved amt_engine_writer on amt_research')
+    return {
+        'neon_project_id': EXPECTED_NEON_PROJECT_ID,
+        'neon_branch_id': EXPECTED_NEON_BRANCH_ID,
+        'database_name': identity['database_name'],
+        'current_user': identity['current_user'],
+        'session_user': identity['session_user'],
+        'identity_verified': True,
+    }
+
+
 def process_session(conn, session_date: date):
+    runtime_audit = verify_runtime_identity(conn)
     lock_key = f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}"
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(hashtext(%s))", (lock_key,))
     conn.commit()
     try:
-        return _process_session_locked(conn, session_date)
+        return _process_session_locked(conn, session_date, runtime_audit)
     finally:
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (lock_key,))
         conn.commit()
 
 
-def _process_session_locked(conn, session_date: date):
+def _process_session_locked(conn, session_date: date, runtime_audit: dict):
     run_id = uuid.uuid4()
     with conn.cursor(row_factory=dict_row) as cur:
         start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -78,7 +107,7 @@ def _process_session_locked(conn, session_date: date):
             run_type = 'RETRY'
         first = min((r['candle_time'] for r in raw), default=None)
         last = max((r['candle_time'] for r in raw), default=None)
-        report = validation.report
+        report = {**validation.report, 'runtime_audit': runtime_audit}
         observed = len({r['candle_time'] for r in raw})
         cur.execute("""INSERT INTO amt_engine.calculation_runs
           (run_id,session_date,method_version,source,symbol,resolution,revision_number,attempt_number,
@@ -99,7 +128,7 @@ def _process_session_locked(conn, session_date: date):
             cur.execute("UPDATE amt_engine.calculation_runs SET execution_status='REJECTED',calculated_at=now(),validation_report=%s::jsonb WHERE run_id=%s",
                         (json.dumps(report),run_id))
         conn.commit()
-        return {'run_id':str(run_id),'status':'REJECTED','revision':revision,'attempt':attempt,'report':report}
+        return {'run_id':str(run_id),'status':'REJECTED','revision':revision,'attempt':attempt,'report':report,'runtime_audit':runtime_audit}
 
     try:
         profile, rows = calculate_profile(session_date, validation.candles)
@@ -121,7 +150,8 @@ def _process_session_locked(conn, session_date: date):
                 cur.execute("UPDATE amt_engine.calculation_runs SET execution_status='SUCCEEDED',calculated_at=now() WHERE run_id=%s",
                             (run_id,))
         return {'run_id':str(run_id),'status':'SUCCEEDED','revision':revision,'attempt':attempt,
-                'profile_rows':1,'tpo_rows':len(rows),'zero_count_rows':sum(r.tpo_count==0 for r in rows)}
+                'profile_rows':1,'tpo_rows':len(rows),'zero_count_rows':sum(r.tpo_count==0 for r in rows),
+                'runtime_audit':runtime_audit}
     except Exception as exc:
         with conn.cursor() as cur:
             cur.execute("UPDATE amt_engine.calculation_runs SET execution_status='FAILED',calculated_at=now(),validation_report=validation_report || %s::jsonb WHERE run_id=%s",
@@ -136,7 +166,8 @@ def main():
     args=parser.parse_args()
     day=date.fromisoformat(args.session_date) if args.session_date else datetime.now(timezone.utc).date()-timedelta(days=1)
     url=os.environ.get('DATABASE_URL')
-    validate_target_environment(url, os.environ.get('NEON_BRANCH_ID'))
+    validate_target_environment(url, os.environ.get('NEON_PROJECT_ID'),
+                               os.environ.get('NEON_BRANCH_ID'), os.environ.get('NEON_DATABASE_NAME'))
     with psycopg.connect(url,row_factory=dict_row) as conn:
         result=process_session(conn,day)
     print(json.dumps(result,default=str,sort_keys=True))
