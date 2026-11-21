@@ -6,6 +6,7 @@ on:
     paths:
       - "amt_engine/**"
       - "tests/test_amt_engine_daily.py"
+      - "tests/test_amt_engine_daily_job.py"
       - ".github/workflows/amt-engine-final-verification.yml"
   pull_request:
     branches: [main, amt-engine-v1-daily-uat]
