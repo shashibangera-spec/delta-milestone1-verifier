@@ -1,0 +1,316 @@
+name: Temporary Delta BTCUSD Live Timestamp Observation
+
+on:
+  push:
+    branches:
+      - tmp/delta-live-timestamp-observation-20261121
+    paths:
+      - .github/workflows/tmp-delta-live-timestamp-observation.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delta-live-timestamp-observation
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    name: Observe seven consecutive 30m intervals
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    steps:
+      - name: Capture live Delta BTCUSD PRICE candles
+        shell: bash
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import base64
+          import csv
+          import hashlib
+          import json
+          import math
+          import os
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from datetime import datetime, timezone
+
+          ENDPOINT = "https://api.india.delta.exchange/v2/history/candles"
+          SYMBOL = "BTCUSD"
+          RESOLUTION = "30m"
+          INTERVAL = 1800
+          POLL = 90
+          INTERVALS = 7
+          REQUEST_TIMEOUT = 20
+
+          def utc(ts):
+              return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+          # Begin on the next UTC half-hour boundary so every tested interval is complete.
+          now = time.time()
+          start_boundary = (math.floor(now / INTERVAL) + 1) * INTERVAL
+          finish_boundary = start_boundary + INTERVALS * INTERVAL
+          print("Waiting for aligned observation start:", utc(start_boundary), flush=True)
+          while time.time() < start_boundary:
+              time.sleep(min(1.0, start_boundary - time.time()))
+
+          raw_path = "evidence/observations.jsonl"
+          csv_path = "evidence/candle_observations.csv"
+          observation_meta = []
+          candle_rows = []
+          poll_id = 0
+          scheduled = start_boundary
+          http_ok = 0
+          http_errors = 0
+          request_latencies = []
+          poll_gaps = []
+          previous_request_start = None
+          missed_schedules = 0
+
+          with open(raw_path, "w", encoding="utf-8", newline="\n") as raw_file:
+              while scheduled <= finish_boundary:
+                  delay = scheduled - time.time()
+                  if delay > 0:
+                      time.sleep(delay)
+                  actual_start = time.time()
+                  if actual_start - scheduled > 2:
+                      missed_schedules += max(0, int((actual_start - scheduled) // POLL))
+                  if previous_request_start is not None:
+                      poll_gaps.append(actual_start - previous_request_start)
+                  previous_request_start = actual_start
+
+                  poll_id += 1
+                  params = {
+                      "symbol": SYMBOL,
+                      "resolution": RESOLUTION,
+                      "start": str(start_boundary),
+                      "end": str(int(actual_start)),
+                  }
+                  url = ENDPOINT + "?" + urllib.parse.urlencode(params)
+                  req = urllib.request.Request(
+                      url,
+                      headers={
+                          "Accept": "application/json",
+                          "User-Agent": "AMT-Engine-V1-Live-Timestamp-Observation/1.0"
+                      },
+                      method="GET"
+                  )
+                  response_started = time.time()
+                  status = None
+                  response_headers = {}
+                  body = b""
+                  error = None
+                  try:
+                      with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                          status = response.status
+                          response_headers = dict(response.headers.items())
+                          body = response.read()
+                      http_ok += 1
+                  except urllib.error.HTTPError as exc:
+                      status = exc.code
+                      response_headers = dict(exc.headers.items()) if exc.headers else {}
+                      body = exc.read()
+                      error = "HTTPError: " + str(exc)
+                      http_errors += 1
+                  except Exception as exc:
+                      error = type(exc).__name__ + ": " + str(exc)
+                      http_errors += 1
+                  response_finished = time.time()
+                  latency = response_finished - response_started
+                  request_latencies.append(latency)
+
+                  record = {
+                      "poll_id": poll_id,
+                      "scheduled_at_utc": utc(scheduled),
+                      "request_started_at_utc": utc(response_started),
+                      "response_received_at_utc": utc(response_finished),
+                      "request_latency_seconds": round(latency, 3),
+                      "http_status": status,
+                      "request_url": url,
+                      "response_headers": response_headers,
+                      "raw_body_sha256": hashlib.sha256(body).hexdigest() if body else None,
+                      "raw_body_base64": base64.b64encode(body).decode("ascii"),
+                      "raw_body_utf8": body.decode("utf-8", errors="replace") if body else "",
+                      "error": error
+                  }
+                  raw_file.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
+                  raw_file.flush()
+                  observation_meta.append(record)
+
+                  if body and status is not None and 200 <= status < 300:
+                      try:
+                          payload = json.loads(body.decode("utf-8"))
+                          items = payload.get("result", []) if isinstance(payload, dict) else []
+                          if isinstance(items, dict):
+                              items = items.get("candles", items.get("data", []))
+                          if isinstance(items, list):
+                              for item in items:
+                                  if not isinstance(item, dict) or "time" not in item:
+                                      continue
+                                  try:
+                                      candle_epoch = int(float(item["time"]))
+                                  except Exception:
+                                      continue
+                                  candle_rows.append({
+                                      "poll_id": poll_id,
+                                      "request_started_at_utc": record["request_started_at_utc"],
+                                      "response_received_at_utc": record["response_received_at_utc"],
+                                      "candle_time_epoch": candle_epoch,
+                                      "candle_time_utc": utc(candle_epoch),
+                                      "open": item.get("open"),
+                                      "high": item.get("high"),
+                                      "low": item.get("low"),
+                                      "close": item.get("close"),
+                                      "volume": item.get("volume"),
+                                      "raw_candle_json": json.dumps(item, separators=(",", ":"), ensure_ascii=False)
+                                  })
+                      except Exception as exc:
+                          record["parse_error"] = type(exc).__name__ + ": " + str(exc)
+
+                  print(
+                      "poll", poll_id,
+                      "status", status,
+                      "latency_s", round(latency, 2),
+                      "observed", record["request_started_at_utc"],
+                      "bytes", len(body),
+                      "error", error,
+                      flush=True
+                  )
+                  scheduled += POLL
+
+          # Flat CSV: every candle returned in every successful response.
+          with open(csv_path, "w", encoding="utf-8", newline="") as f:
+              fields = [
+                  "poll_id", "request_started_at_utc", "response_received_at_utc",
+                  "candle_time_epoch", "candle_time_utc", "open", "high", "low",
+                  "close", "volume", "raw_candle_json"
+              ]
+              writer = csv.DictWriter(f, fieldnames=fields)
+              writer.writeheader()
+              writer.writerows(candle_rows)
+
+          # Index each observation by the candle timestamp(s) it contained.
+          by_poll = {}
+          for row in candle_rows:
+              by_poll.setdefault(row["poll_id"], {})[row["candle_time_epoch"]] = row
+
+          qualifications = []
+          for index in range(INTERVALS):
+              interval_start = start_boundary + index * INTERVAL
+              interval_end = interval_start + INTERVAL
+              pre_candidates = [
+                  x for x in observation_meta
+                  if interval_end - 120 <= datetime.fromisoformat(x["request_started_at_utc"].replace("Z", "+00:00")).timestamp() < interval_end
+              ]
+              post_candidates = [
+                  x for x in observation_meta
+                  if interval_end <= datetime.fromisoformat(x["request_started_at_utc"].replace("Z", "+00:00")).timestamp() <= interval_end + 120
+              ]
+              pre = max(pre_candidates, key=lambda x: x["request_started_at_utc"]) if pre_candidates else None
+              post = min(post_candidates, key=lambda x: x["request_started_at_utc"]) if post_candidates else None
+
+              def candidate(poll, epoch):
+                  if not poll:
+                      return None
+                  row = by_poll.get(poll["poll_id"], {}).get(epoch)
+                  if not row:
+                      return None
+                  return {k: row.get(k) for k in ("candle_time_utc", "open", "high", "low", "close")}
+
+              open_pre = candidate(pre, interval_start)
+              open_post = candidate(post, interval_start)
+              close_pre = candidate(pre, interval_end)
+              close_post = candidate(post, interval_end)
+
+              pre_ts = datetime.fromisoformat(pre["request_started_at_utc"].replace("Z", "+00:00")).timestamp() if pre else None
+              post_ts = datetime.fromisoformat(post["request_started_at_utc"].replace("Z", "+00:00")).timestamp() if post else None
+              qualifications.append({
+                  "interval_start_utc": utc(interval_start),
+                  "interval_end_utc": utc(interval_end),
+                  "pre_poll_id": pre["poll_id"] if pre else None,
+                  "pre_observation_utc": pre["request_started_at_utc"] if pre else None,
+                  "seconds_before_close": round(interval_end - pre_ts, 3) if pre_ts else None,
+                  "post_poll_id": post["poll_id"] if post else None,
+                  "post_observation_utc": post["request_started_at_utc"] if post else None,
+                  "seconds_after_close": round(post_ts - interval_end, 3) if post_ts else None,
+                  "pre_close_capture_qualified": bool(pre and 0 < interval_end - pre_ts <= 120),
+                  "post_close_capture_qualified": bool(post and 0 <= post_ts - interval_end <= 120),
+                  "interval_capture_qualified": bool(pre and post and 0 < interval_end - pre_ts <= 120 and 0 <= post_ts - interval_end <= 120),
+                  "open_timestamp_candidate_pre": open_pre,
+                  "open_timestamp_candidate_post": open_post,
+                  "close_timestamp_candidate_pre": close_pre,
+                  "close_timestamp_candidate_post": close_post
+              })
+
+          with open("evidence/six_interval_qualification.json", "w", encoding="utf-8") as f:
+              json.dump(qualifications, f, indent=2, ensure_ascii=False)
+          with open("evidence/six_interval_qualification.csv", "w", encoding="utf-8", newline="") as f:
+              fields = list(qualifications[0].keys())
+              writer = csv.DictWriter(f, fieldnames=fields)
+              writer.writeheader()
+              for q in qualifications:
+                  writer.writerow({
+                      k: json.dumps(v, separators=(",", ":"), ensure_ascii=False) if isinstance(v, (dict, list)) else v
+                      for k, v in q.items()
+                  })
+
+          observed_times = [
+              datetime.fromisoformat(x["request_started_at_utc"].replace("Z", "+00:00")).timestamp()
+              for x in observation_meta
+          ]
+          report = {
+              "endpoint": ENDPOINT,
+              "symbol": SYMBOL,
+              "resolution": RESOLUTION,
+              "poll_interval_seconds_target": POLL,
+              "planned_interval_count": INTERVALS,
+              "planned_start_utc": utc(start_boundary),
+              "planned_end_utc": utc(finish_boundary),
+              "planned_observation_duration_seconds": finish_boundary - start_boundary,
+              "poll_count": len(observation_meta),
+              "http_2xx_count": http_ok,
+              "http_error_count": http_errors,
+              "candle_observation_rows": len(candle_rows),
+              "max_poll_gap_seconds": round(max(poll_gaps), 3) if poll_gaps else None,
+              "mean_poll_gap_seconds": round(sum(poll_gaps) / len(poll_gaps), 3) if poll_gaps else None,
+              "max_request_latency_seconds": round(max(request_latencies), 3) if request_latencies else None,
+              "mean_request_latency_seconds": round(sum(request_latencies) / len(request_latencies), 3) if request_latencies else None,
+              "missed_poll_schedules": missed_schedules,
+              "all_seven_intervals_qualified": all(x["interval_capture_qualified"] for x in qualifications),
+              "qualified_interval_count": sum(1 for x in qualifications if x["interval_capture_qualified"]),
+              "opening_interpretation_evidence_count": sum(1 for x in qualifications if x["open_timestamp_candidate_post"]),
+              "closing_interpretation_evidence_count": sum(1 for x in qualifications if x["close_timestamp_candidate_post"]),
+              "limitations": [
+                  "A successful HTTP response is not proof that Delta published a provisional candle.",
+                  "Absence of a candle before close may reflect publication delay rather than timestamp semantics.",
+                  "Timestamp-label interpretation must be based on repeated interval-aligned observations, not a single response.",
+                  "No external trade feed or independent exchange was used in this test."
+              ]
+          }
+          with open("evidence/api_access_and_polling_report.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, indent=2)
+          with open("evidence/README.txt", "w", encoding="utf-8") as f:
+              f.write(
+                  "AMT Engine V1 - Delta BTCUSD live timestamp observation\n"
+                  "Instrument: BTCUSD; series: PRICE only; resolution: 30m.\n"
+                  "Raw response bytes are preserved as base64 and UTF-8 text in observations.jsonl.\n"
+                  "raw_body_sha256 hashes the exact response bytes.\n"
+                  "Observation timestamps are UTC; request start is the timing reference for pre/post-close qualification.\n"
+                  "candle_observations.csv contains parsed candle rows from each response.\n"
+                  "six_interval_qualification.csv/json show captures within 120 seconds before and after each close.\n"
+                  "No database, collector, AMT calculation, or session data was changed.\n"
+                  "A qualified capture pair does not by itself prove timestamp semantics.\n"
+              )
+          print("FINAL REPORT:", json.dumps(report, indent=2), flush=True)
+          PY
+
+      - name: Upload observation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-btcusd-live-timestamp-evidence
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
