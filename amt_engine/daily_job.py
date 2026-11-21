@@ -4,9 +4,16 @@ import argparse
 import json
 import os
 import uuid
+from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
 import psycopg
 from psycopg.rows import dict_row
+EXPECTED_NEON_BRANCH_ID = 'br-lingering-grass-ao07mgrx'
+EXPECTED_NEON_HOSTS = {
+    'ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech',
+    'ep-sparkling-queen-aoqgp0mw-pooler.c-2.ap-southeast-1.aws.neon.tech',
+}
+
 from amt_engine.daily import (METHOD_VERSION, SOURCE, SYMBOL, RESOLUTION, validate_session,
     calculate_profile, assign_revision_attempt)
 
@@ -119,6 +126,11 @@ def main():
     day=date.fromisoformat(args.session_date) if args.session_date else datetime.now(timezone.utc).date()-timedelta(days=1)
     url=os.environ.get('DATABASE_URL')
     if not url: raise RuntimeError('DATABASE_URL is required')
+    if os.environ.get('NEON_BRANCH_ID') != EXPECTED_NEON_BRANCH_ID:
+        raise RuntimeError('NEON_BRANCH_ID does not match the approved AMT research branch')
+    host = urlparse(url).hostname
+    if host not in EXPECTED_NEON_HOSTS:
+        raise RuntimeError('DATABASE_URL hostname does not match the approved AMT research endpoint')
     with psycopg.connect(url,row_factory=dict_row) as conn:
         result=process_session(conn,day)
     print(json.dumps(result,default=str,sort_keys=True))
