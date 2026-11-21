@@ -1,5 +1,6 @@
 """Offline mocked tests for the guarded daily writer; never connect to Neon."""
 import unittest
+import json
 from contextlib import contextmanager
 from datetime import date, timedelta
 from decimal import Decimal
@@ -116,7 +117,12 @@ class DailyWriterTests(unittest.TestCase):
         self.assertEqual(len(conn.profile_inserts), 1)
         self.assertGreater(len(conn.tpo_inserts), 0)
         self.assertEqual(conn.status_updates[-1][0], "SUCCEEDED")
-        self.assertEqual(conn.run_inserts[0][20].get("runtime_audit") if isinstance(conn.run_inserts[0][20], dict) else None, None)
+        audit = json.loads(conn.run_inserts[0][20])["runtime_audit"]
+        self.assertEqual(audit["current_user"], "amt_engine_writer")
+        self.assertEqual(audit["session_user"], "amt_engine_writer")
+        self.assertEqual(audit["neon_branch_id"], daily_job.EXPECTED_NEON_BRANCH_ID)
+        self.assertTrue(audit["identity_verified"])
+        self.assertEqual(result["runtime_audit"], audit)
         self.assertEqual(conn.rollback_count, 0)
 
     def test_rejected_input_records_attempt_without_profile_or_tpo_output(self):
@@ -157,10 +163,22 @@ class DailyWriterTests(unittest.TestCase):
         daily_job.process_session(changed, DAY)
         self.assertEqual(changed.run_inserts[0][6:9], (3, 1, "RESTATEMENT"))
 
+    def test_unexpected_runtime_identity_fails_closed_before_any_writes(self):
+        conn = FakeConnection(identity={"database_name": "amt_research", "current_user": "amt_research_owner", "session_user": "amt_engine_writer"})
+        with self.assertRaisesRegex(RuntimeError, "Runtime database identity check failed"):
+            daily_job.process_session(conn, DAY)
+        self.assertEqual(conn.run_inserts, [])
+        self.assertEqual(conn.profile_inserts, [])
+        self.assertEqual(conn.tpo_inserts, [])
+
     def test_branch_and_hostname_guard_fails_closed(self):
         valid_url = "postgresql://user:pass@" + sorted(daily_job.EXPECTED_NEON_HOSTS)[0] + "/amt_research"
         daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_PROJECT_ID,
                                               daily_job.EXPECTED_NEON_BRANCH_ID, daily_job.EXPECTED_DATABASE_NAME)
+        with self.assertRaisesRegex(RuntimeError, "NEON_PROJECT_ID"):
+            daily_job.validate_target_environment(valid_url, "wrong-project", daily_job.EXPECTED_NEON_BRANCH_ID, daily_job.EXPECTED_DATABASE_NAME)
+        with self.assertRaisesRegex(RuntimeError, "NEON_DATABASE_NAME"):
+            daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_PROJECT_ID, daily_job.EXPECTED_NEON_BRANCH_ID, "wrong-db")
         with self.assertRaisesRegex(RuntimeError, "NEON_BRANCH_ID"):
             daily_job.validate_target_environment(valid_url, daily_job.EXPECTED_NEON_PROJECT_ID, "wrong-branch", daily_job.EXPECTED_DATABASE_NAME)
         with self.assertRaisesRegex(RuntimeError, "hostname"):
