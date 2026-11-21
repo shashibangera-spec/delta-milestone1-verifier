@@ -1,5 +1,6 @@
--- REVIEW ONLY. This migration is intentionally not executed by this repository change.
--- Run only after separate explicit database-change approval and writer-role provisioning.
+-- AMT Engine V1.0 schema for the dedicated research branch.
+-- Applied to Neon branch br-lingering-grass-ao07mgrx (amt_research) on 2026-11-21.
+-- Keep source-table access SELECT-only and output-table writes limited to amt_engine_writer.
 CREATE SCHEMA IF NOT EXISTS amt_engine;
 
 CREATE TABLE amt_engine.calculation_runs (
@@ -84,10 +85,10 @@ CREATE TABLE amt_engine.daily_tpo_rows (
 );
 CREATE INDEX daily_tpo_rows_run_value_idx ON amt_engine.daily_tpo_rows(run_id,is_value_area);
 
--- Minimum grants for a pre-created, dedicated writer role; do not run until approved.
--- GRANT USAGE ON SCHEMA research TO amt_engine_writer;
+-- Least-privilege grants applied to dedicated login role amt_engine_writer.
+GRANT USAGE ON SCHEMA research TO amt_engine_writer;
 -- GRANT SELECT (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value)
---   ON research.delta_candles TO amt_engine_writer;
+  ON research.delta_candles TO amt_engine_writer;
 -- GRANT SELECT (source,symbol,series_type,resolution,candle_time,status)
 --   ON research.delta_candles_provisional TO amt_engine_writer;
 -- GRANT USAGE ON SCHEMA amt_engine TO amt_engine_writer;
@@ -95,4 +96,5 @@ CREATE INDEX daily_tpo_rows_run_value_idx ON amt_engine.daily_tpo_rows(run_id,is
 -- GRANT UPDATE (execution_status,calculated_at,validation_report) ON amt_engine.calculation_runs TO amt_engine_writer;
 -- GRANT SELECT,INSERT ON amt_engine.daily_profiles TO amt_engine_writer;
 -- GRANT SELECT,INSERT ON amt_engine.daily_tpo_rows TO amt_engine_writer;
--- No UPDATE/DELETE/TRUNCATE privileges on output tables.
+-- No UPDATE/DELETE/TRUNCATE privileges on daily_profiles or daily_tpo_rows.
+-- calculation_runs UPDATE is column-scoped to execution_status, calculated_at, validation_report.
