@@ -18,6 +18,17 @@ from amt_engine.daily import (METHOD_VERSION, SOURCE, SYMBOL, RESOLUTION, valida
     calculate_profile, assign_revision_attempt)
 
 
+def validate_target_environment(database_url: str | None, branch_id: str | None) -> None:
+    """Fail closed before any connection unless the explicitly approved target matches."""
+    if not database_url:
+        raise RuntimeError('DATABASE_URL is required')
+    if branch_id != EXPECTED_NEON_BRANCH_ID:
+        raise RuntimeError('NEON_BRANCH_ID does not match the approved AMT research branch')
+    host = urlparse(database_url).hostname
+    if host not in EXPECTED_NEON_HOSTS:
+        raise RuntimeError('DATABASE_URL hostname does not match the approved AMT research endpoint')
+
+
 def process_session(conn, session_date: date):
     lock_key = f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}"
     with conn.cursor() as cur:
@@ -125,12 +136,7 @@ def main():
     args=parser.parse_args()
     day=date.fromisoformat(args.session_date) if args.session_date else datetime.now(timezone.utc).date()-timedelta(days=1)
     url=os.environ.get('DATABASE_URL')
-    if not url: raise RuntimeError('DATABASE_URL is required')
-    if os.environ.get('NEON_BRANCH_ID') != EXPECTED_NEON_BRANCH_ID:
-        raise RuntimeError('NEON_BRANCH_ID does not match the approved AMT research branch')
-    host = urlparse(url).hostname
-    if host not in EXPECTED_NEON_HOSTS:
-        raise RuntimeError('DATABASE_URL hostname does not match the approved AMT research endpoint')
+    validate_target_environment(url, os.environ.get('NEON_BRANCH_ID'))
     with psycopg.connect(url,row_factory=dict_row) as conn:
         result=process_session(conn,day)
     print(json.dumps(result,default=str,sort_keys=True))
