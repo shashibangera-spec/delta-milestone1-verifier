@@ -2,7 +2,7 @@
 import unittest
 import json
 from contextlib import contextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -162,6 +162,11 @@ class DailyWriterTests(unittest.TestCase):
         )
         daily_job.process_session(changed, DAY)
         self.assertEqual(changed.run_inserts[0][6:9], (3, 1, "RESTATEMENT"))
+
+    def test_open_utc_session_is_rejected_before_calculation(self):
+        with self.assertRaisesRegex(RuntimeError, "not fully closed"):
+            daily_job.validate_session_closed(date(2026, 11, 21), datetime(2026, 11, 21, 23, 59, tzinfo=timezone.utc))
+        daily_job.validate_session_closed(date(2026, 11, 21), datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc))
 
     def test_unexpected_runtime_identity_fails_closed_before_any_writes(self):
         conn = FakeConnection(identity={"database_name": "amt_research", "current_user": "amt_research_owner", "session_user": "amt_engine_writer"})
