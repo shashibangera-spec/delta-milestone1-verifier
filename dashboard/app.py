@@ -9,6 +9,8 @@ import psycopg
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from oi_attribution import calculate_value_area_oi_breakdown
+from amt_engine.daily import calculate_profile, validate_session
+from amt_engine.developing import calculate_developing_profile
 from session_selection import LIVE_SESSION_LABEL, normalize_session_selection, return_to_live_session
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
@@ -100,7 +102,14 @@ def is_complete_session(df, start):
     return len(df) == 48 and len(actual) == 48 and actual.equals(expected)
 
 def complete_profile(df, start):
-    return tpo_profile(candle_dicts(df)) if is_complete_session(df, start) else None
+    if not is_complete_session(df, start):
+        return None
+    validated = validate_session(start.date(), candle_dicts(df))
+    if not validated.valid:
+        return None
+    profile, rows = calculate_profile(start.date(), validated.candles)
+    return {"VAL": float(profile.val_lower), "POC": float(profile.poc_lower),
+            "VAH": float(profile.vah_upper), "TPOs": profile.total_tpos, "Rows": len(rows)}
 
 def fmt_ts(value):
     if pd.isna(value):
@@ -249,7 +258,9 @@ session_price = price[(price.candle_time >= session_start) & (price.candle_time 
 session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
 prior_profile = complete_profile(prior, prior_start)
 session_profile = complete_profile(session_price, session_start) if not is_live else None
-developing_profile = tpo_profile(candle_dicts(session_price)) if is_live else session_profile
+developing_raw = calculate_developing_profile(session_start.date(), candle_dicts(session_price)) if is_live else None
+developing_profile = ({**developing_raw, "VAL": float(developing_raw["VAL"]), "POC": float(developing_raw["POC"]),
+                      "VAH": float(developing_raw["VAH"]) } if developing_raw else None) if is_live else session_profile
 
 latest_price = session_price.iloc[-1] if not session_price.empty else None
 session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
@@ -262,6 +273,7 @@ if prior_profile:
     st.metric("Prior POC", money(prior_profile["POC"]))
     st.metric("Prior VAL", money(prior_profile["VAL"]))
     st.metric("Prior VA Width", money(prior_profile["VAH"] - prior_profile["VAL"]))
+    st.caption("CALCULATED ONLY · approved AMT Engine V1.0 · 48 confirmed candles. The dashboard has not verified a daily validation/acceptance record; this is NOT an accepted prior-value reference.")
 else:
     st.warning("Prior Day profile unavailable or incomplete: the previous session must contain all 48 confirmed 30m PRICE candles. Historical dates near the start of retained history may not have a preceding session.")
 
@@ -357,13 +369,13 @@ else:
 
 st.divider()
 st.subheader("3 · " + ("DEVELOPING AMT STRUCTURE" if is_live else "COMPLETED SESSION AMT STRUCTURE"))
-st.caption("Developing levels use confirmed 30m brackets only; historical session levels require all 48 confirmed brackets.")
+st.caption("RESEARCH OUTPUT ONLY · Developing levels require a contiguous confirmed 30m prefix from the 00:00 UTC / 05:30 IST reset. Provisional, missing, duplicate, off-grid or invalid candles cause the developing profile to be withheld. Completed profiles use the approved AMT Engine V1.0 core.")
 if developing_profile:
     a,b,c = st.columns(3)
     a.metric("Developing VAL" if is_live else "Session VAL", money(developing_profile["VAL"]))
     b.metric("Developing POC" if is_live else "Session POC", money(developing_profile["POC"]))
     c.metric("Developing VAH" if is_live else "Session VAH", money(developing_profile["VAH"]))
-    st.caption(f"Confirmed brackets: {len(session_price):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
+    st.caption(f"Confirmed brackets: {developing_profile.get('ConfirmedBrackets', len(session_price)):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,} · DEVELOPING / UNVALIDATED / NOT ACCEPTED")
     if prior_profile and is_live:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
         st.metric("VA Expansion vs Prior", money(width_delta), help="Difference in value-area width; positive means wider, negative means narrower.")
