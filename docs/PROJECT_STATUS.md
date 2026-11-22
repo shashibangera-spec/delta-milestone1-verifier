@@ -7,7 +7,7 @@
 
 ## Executive status
 
-AMT Engine V1.0 methodology and the historical parity milestone are accepted. The historical research milestone covering 183 sessions is closed as substantially complete, with its qualifications attached. The accepted 20 and 21 November daily records remain immutable. The 22 November daily record is **PENDING** until its own calculation output and validation are reviewed and accepted.
+AMT Engine V1.0 methodology and the historical parity milestone are accepted. The historical research milestone covering 183 sessions is closed as substantially complete, with its qualifications attached. The accepted 20 and 21 November daily records remain immutable. The 22 November session calculation is **PENDING** until its own calculation output and validation are reviewed and accepted.
 
 This project is a research/verification implementation. No evidence in this record supports a claim of production readiness or unattended operation.
 
@@ -16,12 +16,12 @@ This project is a research/verification implementation. No evidence in this reco
 | Milestone | Status | Evidence / qualification |
 |---|---|---|
 | AMT Engine V1.0 calculation methodology | **COMPLETED / APPROVED** | Frozen rules in [specification](AMT_ENGINE_V1_SPEC.md). |
-| Historical reference parity | **COMPLETED, CONDITIONAL** | 183 profiles; 8,113 TPO rows; zero reported mismatches. This proves calculation parity against the reference inventory, not independent session assignment semantics. |
+| Historical reference parity | **COMPLETED, CONDITIONAL** | 183 profiles; 8,113 TPO rows; zero reported mismatches in the accepted historical parity evidence. Timestamp/session assignment remains conditional. |
 | Daily writer closed-session guard | **COMPLETED / CI-VERIFIED** | Offline GitHub Actions run [44992010705](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44992010705), success. |
 | Persistence rollback regression coverage | **COMPLETED / CI-VERIFIED** | Same offline run; test verifies profile/TPO output rollback before FAILED audit status. |
 | 20 November accepted daily profile | **COMPLETED / IMMUTABLE** | Accepted record preserved; no rewrite or recalculation authorized. |
 | 21 November accepted daily profile | **COMPLETED / PASS / IMMUTABLE** | Accepted PASS preserved; no rewrite or recalculation authorized. |
-| 22 November daily calculation | **PENDING** | Must be separately confirmed from its own run output, persisted record, fingerprint and validation review. |
+| 22 November session calculation | **PENDING** | Must be separately confirmed from its own run output, persisted record, fingerprint and validation review. |
 | Timestamp/session semantics | **CONDITIONAL / UNRESOLVED** | Epoch and stored timestamp match; open-time versus close-time meaning not proven. |
 | MFE/MAE formula/window completeness | **UNVERIFIED / INCOMPLETELY DOCUMENTED** | Starting-price convention, confirmation-candle inclusion and incomplete-window handling are not certified. |
 | Opening-location price field | **UNVERIFIED** | Exact field used is not certified in the accepted addendum. |
@@ -43,15 +43,16 @@ Implementation reference commit: [5e55c3ea8adbfc87907d0225d4d006a38746900b](http
 ## Verified CI evidence
 
 - [Offline daily-writer tests — run 44992010705](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44992010705): SUCCESS on 22 Nov 2026, feature commit `2e14ce2736899a3ad6aa9452bcaecaea3f379c7a`. This ran offline mocks only; no daily DB-writing workflow was dispatched by this CI test.
-- [Historical parity workflow — run 44992010613](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44992010613): SUCCESS on 22 Nov 2026, same feature commit. See the qualification in the validation register.
+- [Offline parity tests + read-only identity preflight — run 44992010613](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44992010613): both jobs SUCCESS on 22 Nov 2026, feature commit `2e14ce2736899a3ad6aa9452bcaecaea3f379c7a`; the actual historical parity job was **SKIPPED**. This run is not evidence that the historical parity calculation executed.
 - [Daily unit tests — run 44990466832](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44990466832): SUCCESS.
 - [Final branch verification — run 44990466830](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44990466830): SUCCESS.
+- [Daily calculation run 44988076116](https://github.com/shashibangera-spec/delta-milestone1-verifier/actions/runs/44988076116): workflow SUCCESS; **session date 21 Nov 2026, execution date 22 Nov 2026**. Do not mislabel this as the 22 November session calculation.
 
-A workflow's SUCCESS conclusion is evidence only for the steps actually executed in that run. It is not evidence that a specific daily session has been accepted.
+A workflow's SUCCESS conclusion is evidence only for the steps actually executed in that run. It is not evidence that a different session has been accepted.
 
 ## Pending validation and next authorized step
 
-1. Keep the 22 November calculation separate. Record its actual run URL, commit, session date, run ID, revision/attempt, input fingerprint, profile validation and acceptance result only after those facts are available.
+1. Keep the 22 November session calculation separate. Record its actual run URL, commit, session date, run ID, revision/attempt, input fingerprint, profile validation and acceptance result only after those facts are available.
 2. Do not dispatch a calculation simply to populate this document.
 3. No new research phase is authorized by this status document. Developing auction behaviour, value migration and event sequencing may be considered only under separate commissioning.
 4. Future documentation maintenance may add evidence for an authorized completed milestone; it must not silently change methodology or historical records.
