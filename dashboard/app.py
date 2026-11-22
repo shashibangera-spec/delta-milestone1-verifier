@@ -22,9 +22,17 @@ IST = timezone(timedelta(hours=5, minutes=30))
 @st.cache_resource
 def get_connection():
     url = os.environ["DATABASE_URL"]
-    conn = psycopg.connect(url, autocommit=True)
+    conn = psycopg.connect(url, autocommit=True, application_name="delta-amt-developing-staging")
     conn.execute("SET default_transaction_read_only = on")
     return conn
+
+def runtime_db_status():
+    row = get_connection().execute("""
+        SELECT current_user,
+               current_setting('default_transaction_read_only'),
+               current_setting('transaction_read_only')
+    """).fetchone()
+    return {"role": row[0], "default_read_only": row[1], "transaction_read_only": row[2]}
 
 def utc_midnight(dt):
     return dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -122,6 +130,12 @@ def money(value):
 
 st.title("BTC AMT Research Dashboard")
 st.caption("ISOLATED RESEARCH • Neon amt_research • SELECT-only database role")
+try:
+    db_status = runtime_db_status()
+    st.caption(f"RUNTIME DB SAFETY · role={db_status['role']} · default_transaction_read_only={db_status['default_read_only']} · transaction_read_only={db_status['transaction_read_only']}")
+except Exception as exc:
+    st.error(f"Runtime database safety verification failed: {exc}")
+    st.stop()
 
 @st.cache_data(ttl=45)
 def load_frames():
