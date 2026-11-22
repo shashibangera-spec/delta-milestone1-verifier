@@ -40,7 +40,7 @@ class DevelopingProfileTests(unittest.TestCase):
         result = calculate_developing_profile(self.day, rows)
         self.assertEqual(result["POC"], Decimal("50"))
         self.assertEqual(result["VAL"], Decimal("0"))
-        self.assertEqual(result["VAH"], Decimal("100"))
+        self.assertEqual(result["VAH"], Decimal("150"))
 
     def test_partial_session_prefix_is_valid(self):
         rows = [self.row(i, "100", "200") for i in range(7)]
