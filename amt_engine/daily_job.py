@@ -66,7 +66,9 @@ def verify_runtime_identity(conn) -> dict:
     }
 
 
-def process_session(conn, session_date: date):
+def process_session(conn, session_date: date, now: datetime | None = None):
+    """Process only a fully closed UTC session, even when called outside the CLI."""
+    validate_session_closed(session_date, now)
     runtime_audit = verify_runtime_identity(conn)
     lock_key = f"{session_date}:{METHOD_VERSION}:{SOURCE}:{SYMBOL}"
     with conn.cursor() as cur:
