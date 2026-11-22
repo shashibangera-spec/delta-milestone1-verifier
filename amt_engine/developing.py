@@ -58,5 +58,7 @@ def calculate_developing_profile(session_date, raw_rows):
         "TPOs": total_tpos,
         "Rows": len(counts),
         "ConfirmedBrackets": len(candles),
-        "ProfileStatus": "DEVELOPING · RESEARCH OUTPUT · UNVALIDATED",
+        "InputValidationStatus": "PASS · CONTIGUOUS CONFIRMED PREFIX",
+        "ProfileCalculationStatus": "DEVELOPING · CALCULATED · RESEARCH OUTPUT",
+        "DailyAcceptanceStatus": "NOT APPLICABLE · NOT ACCEPTED",
     }
