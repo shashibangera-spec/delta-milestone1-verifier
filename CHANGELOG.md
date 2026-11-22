@@ -49,3 +49,8 @@
 - Verified source INSERT is denied, unapproved source columns are not selectable, and output DELETE is denied. Existing read-only identities were not modified.
 - Added a manually triggered research-branch daily execution workflow; it requires the repository secret `AMT_ENGINE_DATABASE_URL` and does not deploy or run automatically.
 - Historical parity evidence and conditional session-assignment qualification remain unchanged.
+
+## AMT Engine V1.0 closed-session guard hardening
+- Enforce the completed UTC-session boundary inside the daily writer entrypoint as well as the CLI, so direct callers cannot bypass the 48-candle session-close requirement.
+- Add a focused offline regression test confirming an open-session direct call exits before identity checks or any database writes.
+- No calculation methodology, source data, schema, collector, dashboard, Pine, or production systems changed.
