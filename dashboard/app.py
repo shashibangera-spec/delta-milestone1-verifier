@@ -273,7 +273,7 @@ if prior_profile:
     st.metric("Prior POC", money(prior_profile["POC"]))
     st.metric("Prior VAL", money(prior_profile["VAL"]))
     st.metric("Prior VA Width", money(prior_profile["VAH"] - prior_profile["VAL"]))
-    st.caption("CALCULATED ONLY · approved AMT Engine V1.0 · 48 confirmed candles. The dashboard has not verified a daily validation/acceptance record; this is NOT an accepted prior-value reference.")
+    st.caption("INPUT VALIDATED + CALCULATED · approved AMT Engine V1.0 · 48 confirmed candles. Daily record acceptance is not checked by this dashboard; this is NOT an accepted daily reference.")
 else:
     st.warning("Prior Day profile unavailable or incomplete: the previous session must contain all 48 confirmed 30m PRICE candles. Historical dates near the start of retained history may not have a preceding session.")
 
