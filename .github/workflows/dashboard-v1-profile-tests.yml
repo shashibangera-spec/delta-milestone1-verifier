@@ -31,3 +31,5 @@ jobs:
         run: python -m unittest discover -s tests -p "test_amt_engine_daily.py" -v
       - name: Run developing-profile focused tests
         run: python -m unittest dashboard.test_developing_profile -v
+      - name: Compile dashboard and profile modules
+        run: python -m py_compile dashboard/app.py amt_engine/daily.py amt_engine/developing.py
