@@ -1,0 +1,40 @@
+name: Auction State Observer V1 UI tests
+
+on:
+  push:
+    branches:
+      - feat/auction-state-observer-v1-ui
+  pull_request:
+    branches:
+      - milestone3-browser-dashboard
+    paths:
+      - "dashboard/observer_v1.py"
+      - "dashboard/observer_v1_model.py"
+      - "dashboard/test_observer_v1.py"
+      - "dashboard/app.py"
+      - ".github/workflows/observer-v1-ui-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  observer-ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Observer V1 presentation adapter tests
+        working-directory: dashboard
+        run: python -m unittest -v test_observer_v1.py
+      - name: Compile dashboard and Observer UI modules
+        run: python -m py_compile dashboard/app.py dashboard/observer_v1.py dashboard/observer_v1_model.py
+      - name: Run full dashboard offline regression suite
+        run: python -m unittest discover -s dashboard -p "test_*.py" -v
+      - name: Run approved AMT Engine V1.0 core regression suite
+        run: python -m unittest discover -s tests -p "test_amt_engine_daily.py" -v
+      - name: Build isolated dashboard image (no deployment)
+        run: docker build -f dashboard/Dockerfile -t observer-v1-ui-offline-check .

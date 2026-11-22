@@ -13,6 +13,7 @@ from oi_attribution import calculate_value_area_oi_breakdown
 from amt_engine.daily import calculate_profile, validate_session
 from amt_engine.developing import calculate_developing_profile
 from session_selection import LIVE_SESSION_LABEL, normalize_session_selection, return_to_live_session
+from observer_v1 import render_observer_v1
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
 
@@ -344,6 +345,17 @@ developing_profile = ({**developing_raw, "VAL": float(developing_raw["VAL"]), "P
 latest_price = session_price.iloc[-1] if not session_price.empty else None
 session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
 latest_oi = session_oi.iloc[-1] if not session_oi.empty else None
+
+render_observer_v1(
+    session_start=session_start,
+    is_live=is_live,
+    latest_price=latest_price,
+    prior_profile=prior_profile,
+    developing_profile=developing_profile,
+    price_sequence=price_sequence,
+    confirmed_price_count=len(session_price),
+    latest_oi=latest_oi,
+)
 
 st.subheader("1 · PRICE ACTION & PRIOR VALUE AREA")
 st.caption(f"AMT session reset: {ist_start.strftime('%d %b %Y, %H:%M')} IST / {session_start.strftime('%H:%M')} UTC")
