@@ -33,3 +33,5 @@ jobs:
         run: python -m unittest discover -s dashboard -p "test_*.py" -v
       - name: Compile dashboard and profile modules
         run: python -m py_compile dashboard/app.py amt_engine/daily.py amt_engine/developing.py
+      - name: Build isolated dashboard image (no deployment)
+        run: docker build -f dashboard/Dockerfile -t amt-dashboard-offline-check .
