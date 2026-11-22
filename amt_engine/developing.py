@@ -57,6 +57,8 @@ def calculate_developing_profile(session_date, raw_rows):
         "VAH": Decimal(high_edge + 1) * ROW_SIZE,
         "TPOs": total_tpos,
         "Rows": len(counts),
+        "ValueAreaTPOs": included,
+        "ValueAreaRows": high_edge - low_edge + 1,
         "ConfirmedBrackets": len(candles),
         "InputValidationStatus": "PASS · CONTIGUOUS CONFIRMED PREFIX",
         "ProfileCalculationStatus": "DEVELOPING · CALCULATED · RESEARCH OUTPUT",
