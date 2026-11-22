@@ -13,9 +13,9 @@ COPY dashboard/multi_day_research.py ./multi_day_research.py
 COPY dashboard/test_oi_attribution.py ./test_oi_attribution.py
 COPY dashboard/test_multi_day_research.py ./test_multi_day_research.py
 COPY dashboard/test_observer_v1.py ./test_observer_v1.py
-RUN python -m unittest discover -s . -p 'test_*.py' -v
 COPY dashboard/observer_v1.py ./observer_v1.py
 COPY dashboard/observer_v1_model.py ./observer_v1_model.py
+RUN python -m unittest discover -s . -p 'test_*.py' -v
 COPY dashboard/app.py ./app.py
 COPY dashboard/session_selection.py ./session_selection.py
 ENV PYTHONUNBUFFERED=1
