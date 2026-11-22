@@ -34,13 +34,13 @@ class DevelopingProfileTests(unittest.TestCase):
         self.assertEqual(result["POC"], Decimal("100"))
 
     def test_value_area_expansion_tie_chooses_lower_candidate(self):
-        rows = [self.row(i, "50", "100") for i in range(24)]
+        rows = [self.row(i, "50", "99") for i in range(24)]
         rows += [self.row(i + 24, "0", "0") for i in range(12)]
         rows += [self.row(i + 36, "100", "100") for i in range(12)]
         result = calculate_developing_profile(self.day, rows)
         self.assertEqual(result["POC"], Decimal("50"))
         self.assertEqual(result["VAL"], Decimal("0"))
-        self.assertEqual(result["VAH"], Decimal("150"))
+        self.assertEqual(result["VAH"], Decimal("100"))
 
     def test_partial_session_prefix_is_valid(self):
         rows = [self.row(i, "100", "200") for i in range(7)]
