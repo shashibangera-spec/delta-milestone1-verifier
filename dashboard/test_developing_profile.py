@@ -87,5 +87,40 @@ class DevelopingProfileTests(unittest.TestCase):
         self.assertEqual(developing["TPOs"], approved_profile.total_tpos)
 
 
+    def test_live_read_only_2026_11_22_confirmed_snapshot_matches_independent_decimal_fixture(self):
+        # Read-only snapshot from research.delta_candles, source=delta_india,
+        # resolution=30m, PRICE/BTCUSD, session 2026-11-22 00:00-07:00 UTC.
+        raw = [
+            ("60191", "60320", "60153", "60270.5"),
+            ("60270.5", "60317", "60123.5", "60191"),
+            ("60174.5", "60226.5", "60088.5", "60096"),
+            ("60096.5", "60195", "59984.5", "60088"),
+            ("60088", "60161", "59787", "59823.5"),
+            ("59824", "59824", "59390", "59474.5"),
+            ("59468", "59587.5", "59242.5", "59355"),
+            ("59355", "59401", "59101", "59335.5"),
+            ("59335.5", "59645", "59166", "59243.5"),
+            ("59243.5", "59436", "59220", "59295"),
+            ("59290", "59308", "58776", "58987"),
+            ("58987.5", "59062.5", "58750", "58900"),
+            ("58900", "59163.5", "58900", "59016.5"),
+            ("59016", "59270.5", "58982.5", "59129.5"),
+            ("59129", "59201.5", "58994.5", "59081.5"),
+        ]
+        candles = []
+        for index, (o, h, l, c) in enumerate(raw):
+            candles.append({
+                "candle_time": self.start + timedelta(seconds=index * BAR_SECONDS),
+                "open_value": o, "high_value": h, "low_value": l, "close_value": c,
+            })
+        result = calculate_developing_profile(self.day, candles)
+        self.assertEqual(result["ConfirmedBrackets"], 15)
+        self.assertEqual(result["TPOs"], 105)
+        self.assertEqual(result["Rows"], 32)
+        self.assertEqual(result["POC"], Decimal("59200"))
+        self.assertEqual(result["VAL"], Decimal("58750"))
+        self.assertEqual(result["VAH"], Decimal("59650"))
+
+
 if __name__ == "__main__":
     unittest.main()
