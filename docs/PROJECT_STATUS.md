@@ -56,3 +56,23 @@ A workflow's SUCCESS conclusion is evidence only for the steps actually executed
 2. Do not dispatch a calculation simply to populate this document.
 3. No new research phase is authorized by this status document. Developing auction behaviour, value migration and event sequencing may be considered only under separate commissioning.
 4. Future documentation maintenance may add evidence for an authorized completed milestone; it must not silently change methodology or historical records.
+
+
+## Auction State Observer V1 — documentation status (22 Nov 2026)
+
+**Methodology status: ACCEPTED FOR DOCUMENTATION PURPOSES / CLOSED.** The consolidated V1 methodology is recorded in [Auction State Observer V1 — Final Methodology Baseline](AUCTION_STATE_OBSERVER_V1_METHODOLOGY.md), incorporating Issue #13's final Balance candidate-start clarification.
+
+| Observer V1 item | Status | Qualification |
+|---|---|---|
+| Methodology decisions | **CLOSED FOR DOCUMENTATION** | Rules and state/event semantics are finalized as a documentation baseline. |
+| Balance anchor | **DEFINED / EVIDENCE-CONDITIONAL** | First expected 00:00–00:30 UTC candle; developing snapshot captured at its confirmed close. Session mapping remains NOT VERIFIED. |
+| Balance 12-bar window | **DEFINED / NOT VALIDATED** | All 12 expected bars must be present and valid; assess only after the twelfth bar closes. Otherwise INSUFFICIENT EVIDENCE. |
+| Balance confirmed first-screen condition | **UNAVAILABLE / NOT VERIFIED** | Requires completed and accepted read-only 6/12/16-bar historical sensitivity review. |
+| Accepted prior-profile eligibility | **NOT VERIFIED** | Auditable acceptance artifact/workflow not demonstrated. |
+| Source finality | **NOT VERIFIED** | Provider finality or evidenced finalization policy not established. |
+| Feed/timestamp/session mapping | **CONDITIONAL / NOT VERIFIED** | Exact source semantics and session assignment must be established. |
+| Developing-profile as-of validity | **NOT VERIFIED** | Same-cutoff calculation and snapshot validity require evidence. |
+| As-observed historical replay | **UNAVAILABLE unless revisions/snapshots exist** | Latest-data reconstruction is not as-observed replay. |
+| Implementation readiness | **NOT AUTHORIZED / NOT ESTABLISHED** | Documentation closure is not implementation authorization. |
+
+The Observer V1 workstream is documentation-only. Existing project freeze remains in force: no application code, database, schema, collector, PR implementation, staging, production dashboard or deployment changes. No production-readiness claim is made.

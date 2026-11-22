@@ -79,3 +79,38 @@ Additional successful checks:
 - **UNVERIFIED:** the available evidence does not establish the claim.
 
 Never convert a workflow SUCCESS into a market-data PASS without the session-specific record and validation evidence. Never overwrite accepted profiles or fingerprints.
+
+
+## 6. Auction State Observer V1 — methodology and evidence register
+
+**Methodology disposition:** ACCEPTED FOR DOCUMENTATION PURPOSES / CLOSED.  
+**Implementation disposition:** NOT AUTHORIZED / NOT IMPLEMENTATION-READY.
+
+The approved rules are recorded in [AUCTION_STATE_OBSERVER_V1_METHODOLOGY.md](AUCTION_STATE_OBSERVER_V1_METHODOLOGY.md). This section distinguishes a documented rule from evidence that the underlying capability exists.
+
+| Item | Register status | Evidence/acceptance requirement |
+|---|---|---|
+| Methodology and event semantics | **CLOSED FOR DOCUMENTATION** | Issue #13 consolidated disposition and final Balance clarification. |
+| Balance anchor | **DEFINED / CONDITIONAL** | First expected 00:00–00:30 UTC bar; snapshot at confirmed close. Session mapping must be verified. |
+| Balance window | **DEFINED / NOT HISTORICALLY VALIDATED** | All 12 expected bars present and valid; assess after twelfth confirmed close; otherwise INSUFFICIENT EVIDENCE. |
+| Balance first-screen confirmation | **UNAVAILABLE / NOT VERIFIED** | Read-only 6/12/16-bar historical sensitivity review completed and accepted. |
+| Accepted completed-profile eligibility | **NOT VERIFIED** | Trusted auditable acceptance artifact/workflow, including profile identity, method/version, source fingerprint, validation, authorizer/time and revision handling. |
+| Source finality | **NOT VERIFIED** | Provider metadata or evidenced approved finalization policy; elapsed time is insufficient. |
+| Feed/timestamp/session mapping | **CONDITIONAL / NOT VERIFIED** | Exact instrument/feed, candle identity, timestamp semantics, 30m grid and session assignment. |
+| Developing-profile as-of validity | **NOT VERIFIED** | Valid comparable snapshot at the exact confirmed-candle cutoff. |
+| As-observed replay | **UNAVAILABLE unless revisions/snapshots exist** | Source revision/snapshot history sufficient to reconstruct past knowledge states. |
+| Calculation validation/acceptance | **NOT VERIFIED until evidenced** | Independent validation evidence; successful calculation alone is insufficient. |
+
+### Deferred validation — Balance sensitivity
+
+Perform a **read-only** historical comparison of 6-, 12- and 16-completed-bar Balance windows. Keep the final session anchor, midpoint transition definition, frozen developing-profile baseline and Balance-only ±$50 continuous component-stability rule consistent across comparisons.
+
+Record false activations, detection delay, insufficient-evidence frequency, reset behaviour, missing-snapshot effects, regime sensitivity and component-stability cancellations. Document sample coverage and limitations. Do not treat 12 bars as validated before review acceptance. Until then, Balance is unavailable as a confirmed first-screen condition.
+
+### Required event edge-case validation
+
+Include boundary equality, gaps, invalid/off-grid candles, conflicting duplicates, provisional bars, simultaneous upper/lower excursions, missing/stale developing profiles, confirmed Discovery followed by Return to Value, session rollover, idempotent repeated processing, source corrections, missing Balance anchor, incomplete 12-bar window, midpoint equality, one-direction-only rotation, exactly $50 movement and movement greater than $50 followed by re-entry.
+
+### Evidence interpretation
+
+This register currently records methodology decisions, not completed Observer V1 data validation or implementation tests. No Balance sensitivity result, accepted-profile capability, source-finality capability, session mapping, developing-profile as-of proof or as-observed replay capability is claimed. Preserve every NOT VERIFIED, CONDITIONAL and UNAVAILABLE status until its stated evidence is reviewed and accepted.

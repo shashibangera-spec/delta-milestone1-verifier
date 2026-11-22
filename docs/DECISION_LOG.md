@@ -25,3 +25,17 @@ This log records decisions and scope boundaries known to be approved. Dates use 
 4. Mark unknown facts **UNVERIFIED**, assumptions **CONDITIONAL**, and unfinished work **PENDING**.
 5. No production readiness or unattended-operation claim without direct evidence and explicit approval.
 6. No new research phase, implementation, schema migration, workflow change, Pine change, collector/dashboard change or production action without separate explicit authorization.
+
+
+## Auction State Observer V1 — Product Owner decisions (22 Nov 2026)
+
+| Date | Decision / approval | Status and effect |
+|---|---|---|
+| 22 Nov 2026 | Auction State Observer V1 consolidated methodology baseline accepted for documentation purposes. | **APPROVED / CLOSED FOR DOCUMENTATION** — see [final methodology](AUCTION_STATE_OBSERVER_V1_METHODOLOGY.md) and [Issue #13](https://github.com/shashibangera-spec/delta-milestone1-verifier/issues/13). No implementation authorization. |
+| 22 Nov 2026 | Balance anchor fixed to the first expected 00:00–00:30 UTC candle; developing-profile snapshot captured at that candle's confirmed close. | **FINALIZED RULE** — subject to verified source timestamp/session mapping. |
+| 22 Nov 2026 | Balance assessment requires all 12 expected bars to be present and valid; evaluate only after the twelfth bar closes. | **FINALIZED RULE** — any missing/invalid/unconfirmed/conflicting bar or unavailable anchor snapshot yields INSUFFICIENT EVIDENCE; no late start or re-anchoring. |
+| 22 Nov 2026 | Balance remains unavailable as a confirmed first-screen condition until the read-only 6/12/16-bar historical sensitivity review is completed and accepted. | **BINDING VALIDATION GATE** — 12 bars remains an initial operational design threshold, not an empirically validated market constant. |
+| 22 Nov 2026 | Profile acceptance, source finality, exact feed/timestamp/session mapping and developing-profile as-of validity remain explicit evidence gates. | **NOT VERIFIED / CONDITIONAL** — do not infer PASS from completeness, run success, elapsed time or row existence. |
+| 22 Nov 2026 | Observer V1 work is documentation-only under the existing freeze. | **AUTHORIZED SCOPE** — methodology/status/decision/validation documentation only; no application code, database, schema, collector, PR implementation, staging, production dashboard or deployment changes. |
+
+These decisions close the methodology design baseline for documentation only. They do not certify capability, validation completion or implementation readiness.
