@@ -100,11 +100,13 @@ class FakeConnection:
     def transaction(self):
         profile_len = len(self.profile_inserts)
         tpo_len = len(self.tpo_inserts)
+        status_len = len(self.status_updates)
         try:
             yield
         except Exception:
             del self.profile_inserts[profile_len:]
             del self.tpo_inserts[tpo_len:]
+            del self.status_updates[status_len:]
             self.rollback_count += 1
             raise
 
@@ -140,6 +142,7 @@ class DailyWriterTests(unittest.TestCase):
         self.assertEqual(conn.profile_inserts, [])
         self.assertEqual(conn.tpo_inserts, [])
         self.assertEqual(conn.rollback_count, 1)
+        self.assertNotIn("SUCCEEDED", [status for status, _ in conn.status_updates])
         self.assertEqual(conn.status_updates[-1][0], "FAILED")
 
     def test_unchanged_input_is_retry_and_changed_input_is_restatement(self):
