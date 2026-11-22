@@ -273,7 +273,9 @@ if prior_profile:
     st.metric("Prior POC", money(prior_profile["POC"]))
     st.metric("Prior VAL", money(prior_profile["VAL"]))
     st.metric("Prior VA Width", money(prior_profile["VAH"] - prior_profile["VAL"]))
-    st.caption("INPUT VALIDATED + CALCULATED · approved AMT Engine V1.0 · 48 confirmed candles. Daily record acceptance is not checked by this dashboard; this is NOT an accepted daily reference.")
+    st.caption("INPUT VALIDATION: PASS · 48/48 confirmed 30m PRICE candles, exact session timestamps and valid OHLC.")
+    st.caption("PROFILE CALCULATION: COMPLETE · calculated with approved AMT Engine V1.0 rules.")
+    st.caption("DAILY AMT ENGINE ACCEPTANCE: NOT VERIFIED · this dashboard does not read the daily acceptance register. NOT ACCEPTED.")
 else:
     st.warning("Prior Day profile unavailable or incomplete: the previous session must contain all 48 confirmed 30m PRICE candles. Historical dates near the start of retained history may not have a preceding session.")
 
@@ -369,13 +371,15 @@ else:
 
 st.divider()
 st.subheader("3 · " + ("DEVELOPING AMT STRUCTURE" if is_live else "COMPLETED SESSION AMT STRUCTURE"))
-st.caption("RESEARCH OUTPUT ONLY · Developing levels require a contiguous confirmed 30m prefix from the 00:00 UTC / 05:30 IST reset. Provisional, missing, duplicate, off-grid or invalid candles cause the developing profile to be withheld. Completed profiles use the approved AMT Engine V1.0 core.")
+st.caption("INPUT VALIDATION: A developing profile is calculated only after the confirmed candles pass contiguous-prefix, timestamp and OHLC checks from the 00:00 UTC / 05:30 IST reset. Provisional candles are excluded; missing, duplicate, off-grid, invalid or interrupted sequences are withheld.")
+st.caption("PROFILE CALCULATION: DEVELOPING · calculated research output using approved AMT Engine V1.0 rules; not a completed daily profile.")
+st.caption("DAILY AMT ENGINE ACCEPTANCE: NOT APPLICABLE · the session is still developing. This output is NOT ACCEPTED as a daily profile.")
 if developing_profile:
     a,b,c = st.columns(3)
     a.metric("Developing VAL" if is_live else "Session VAL", money(developing_profile["VAL"]))
     b.metric("Developing POC" if is_live else "Session POC", money(developing_profile["POC"]))
     c.metric("Developing VAH" if is_live else "Session VAH", money(developing_profile["VAH"]))
-    st.caption(f"Confirmed brackets: {developing_profile.get('ConfirmedBrackets', len(session_price)):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,} · DEVELOPING / UNVALIDATED / NOT ACCEPTED")
+    st.caption(f"INPUT VALIDATION: PASS · {developing_profile.get('ConfirmedBrackets', len(session_price)):,} contiguous confirmed brackets · {developing_profile['TPOs']:,} TPOs · {developing_profile['Rows']:,} occupied $50 rows.")
     if prior_profile and is_live:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
         st.metric("VA Expansion vs Prior", money(width_delta), help="Difference in value-area width; positive means wider, negative means narrower.")
