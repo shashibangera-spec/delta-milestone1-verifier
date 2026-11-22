@@ -2,7 +2,7 @@
 
 **As of:** 22 November 2026  
 **Repository:** `shashibangera-spec/delta-milestone1-verifier`  
-**Documentation branch:** `docs/amt-engine-project-record` (this PR)  
+**Documentation branch:** `docs/auction-state-observer-v1-baseline`  
 **Default branch observed before this PR:** `main`
 
 ## Executive status

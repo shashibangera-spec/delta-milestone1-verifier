@@ -27,7 +27,7 @@ This log records decisions and scope boundaries known to be approved. Dates use 
 6. No new research phase, implementation, schema migration, workflow change, Pine change, collector/dashboard change or production action without separate explicit authorization.
 
 
-## Auction State Observer V1 — Product Owner decisions (22 Nov 2026)
+## Auction State Observer V1 — delegated methodology dispositions (22 Nov 2026)
 
 | Date | Decision / approval | Status and effect |
 |---|---|---|
@@ -38,4 +38,4 @@ This log records decisions and scope boundaries known to be approved. Dates use 
 | 22 Nov 2026 | Profile acceptance, source finality, exact feed/timestamp/session mapping and developing-profile as-of validity remain explicit evidence gates. | **NOT VERIFIED / CONDITIONAL** — do not infer PASS from completeness, run success, elapsed time or row existence. |
 | 22 Nov 2026 | Observer V1 work is documentation-only under the existing freeze. | **AUTHORIZED SCOPE** — methodology/status/decision/validation documentation only; no application code, database, schema, collector, PR implementation, staging, production dashboard or deployment changes. |
 
-These decisions close the methodology design baseline for documentation only. They do not certify capability, validation completion or implementation readiness.
+These are delegated Observer methodology dispositions recorded for the documentation baseline; they are not represented as separate decisions individually approved by the Product Owner. They close the methodology design baseline for documentation only and do not certify capability, validation completion or implementation readiness.
