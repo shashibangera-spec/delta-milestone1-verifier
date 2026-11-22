@@ -239,7 +239,7 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
 
     rows = tuple(
         TpoRow(Decimal(bucket) * ROW_SIZE, Decimal(bucket + 1) * ROW_SIZE,
-               counts.get(bucket, 0), bucket == poc_bucket, bucket in selected)
+               counts.get(bucket, 0), bucket == poc_bucket, low_edge <= bucket <= high_edge)
         for bucket in range(min_bucket, max_bucket + 1)
     )
     profile = Profile(
