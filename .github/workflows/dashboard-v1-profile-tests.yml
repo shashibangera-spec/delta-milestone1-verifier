@@ -1,0 +1,33 @@
+name: Dashboard V1 developing-profile offline tests
+
+on:
+  pull_request:
+    branches:
+      - milestone3-browser-dashboard
+    paths:
+      - "amt_engine/**"
+      - "dashboard/app.py"
+      - "dashboard/Dockerfile"
+      - "dashboard/test_developing_profile.py"
+      - ".github/workflows/dashboard-v1-profile-tests.yml"
+  push:
+    branches:
+      - fix/dashboard-v1-developing-profile
+
+permissions:
+  contents: read
+
+jobs:
+  offline-profile-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run approved V1.0 core regression tests
+        run: python -m unittest discover -s tests -p "test_amt_engine_daily.py" -v
+      - name: Run developing-profile focused tests
+        run: python -m unittest dashboard.test_developing_profile -v
