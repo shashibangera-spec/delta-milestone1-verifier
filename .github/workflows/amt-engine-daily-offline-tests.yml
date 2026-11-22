@@ -1,0 +1,46 @@
+name: AMT Engine daily writer offline tests
+
+on:
+  push:
+    branches:
+      - feat/amt-engine-daily-v1-corrected
+    paths:
+      - ".github/workflows/amt-engine-daily-offline-tests.yml"
+      - "amt_engine/**"
+      - "tests/test_amt_engine_daily_job.py"
+      - "requirements.txt"
+  pull_request:
+    branches:
+      - feat/amt-engine-daily-v1-corrected
+    paths:
+      - ".github/workflows/amt-engine-daily-offline-tests.yml"
+      - "amt_engine/**"
+      - "tests/test_amt_engine_daily_job.py"
+      - "requirements.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amt-engine-daily-offline-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-daily-writer-tests:
+    if: github.event_name == 'push' || github.event.pull_request.base.ref == 'feat/amt-engine-daily-v1-corrected'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile daily writer and focused test module
+        run: python -m compileall -q amt_engine/daily_job.py tests/test_amt_engine_daily_job.py
+      - name: Run daily writer tests (offline mocks only)
+        run: python -m unittest discover -s tests -p 'test_amt_engine_daily_job.py' -v
