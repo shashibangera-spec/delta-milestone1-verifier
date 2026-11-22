@@ -236,6 +236,7 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
         raise ValueError("no TPO rows generated")
 
     poc_bucket, low_edge, high_edge, total_tpos, value_count = _calculate_poc_and_value_area(counts)
+    min_bucket, max_bucket = min(counts), max(counts)
 
     rows = tuple(
         TpoRow(Decimal(bucket) * ROW_SIZE, Decimal(bucket + 1) * ROW_SIZE,
