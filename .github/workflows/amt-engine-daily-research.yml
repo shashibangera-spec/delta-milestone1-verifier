@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   calculate:
+    # The user must select the approved feature branch in the Actions UI.
+    # No job steps (including checkout) run for any other ref.
     if: github.ref == 'refs/heads/feat/amt-engine-daily-v1-corrected'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -27,10 +29,22 @@ jobs:
       NEON_BRANCH_ID: br-lingering-grass-ao07mgrx
       NEON_DATABASE_NAME: amt_research
     steps:
+      - name: Enforce approved execution branch
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/feat/amt-engine-daily-v1-corrected" ]; then
+            echo "::error::Refusing to run outside feat/amt-engine-daily-v1-corrected."
+            exit 1
+          fi
       - name: Check out approved feature branch
         uses: actions/checkout@v4
         with:
           ref: feat/amt-engine-daily-v1-corrected
+      - name: Verify checked-out branch
+        shell: bash
+        run: |
+          test "$(git branch --show-current)" = "feat/amt-engine-daily-v1-corrected"
+          test "$(git rev-parse --abbrev-ref HEAD)" = "feat/amt-engine-daily-v1-corrected"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
