@@ -58,6 +58,16 @@ class DevelopingProfileTests(unittest.TestCase):
         rows[3]["candle_time"] += timedelta(minutes=30)
         self.assertIsNone(calculate_developing_profile(self.day, rows))
 
+    def test_duplicate_slot_fails_closed(self):
+        rows = [self.row(i, "100", "200") for i in range(5)]
+        rows[4]["candle_time"] = rows[3]["candle_time"]
+        self.assertIsNone(calculate_developing_profile(self.day, rows))
+
+    def test_off_grid_slot_fails_closed(self):
+        rows = [self.row(i, "100", "200") for i in range(5)]
+        rows[2]["candle_time"] += timedelta(minutes=1)
+        self.assertIsNone(calculate_developing_profile(self.day, rows))
+
     def test_invalid_ohlc_fails_closed(self):
         rows = [self.row(i, "100", "200") for i in range(4)]
         rows[2]["low_value"] = "250"
