@@ -184,6 +184,33 @@ def _bucket(price: Decimal) -> int:
     return int((price / ROW_SIZE).to_integral_value(rounding=ROUND_FLOOR))
 
 
+def _calculate_poc_and_value_area(counts: dict[int, int]) -> tuple[int, int, int, int, int]:
+    """Shared V1.0 POC and Option A value-area expansion for complete and developing profiles."""
+    if not counts:
+        raise ValueError("no TPO rows generated")
+    min_bucket, max_bucket = min(counts), max(counts)
+    poc_bucket = min(counts, key=lambda b: (-counts[b], b))
+    total_tpos = sum(counts.values())
+    target = int((Decimal(total_tpos) * VALUE_AREA_FRACTION).to_integral_value(rounding=ROUND_CEILING))
+    low_edge = high_edge = poc_bucket
+    value_count = counts[poc_bucket]
+    while value_count < target:
+        candidates = []
+        if low_edge > min_bucket:
+            candidates.append((counts.get(low_edge - 1, 0), low_edge - 1))
+        if high_edge < max_bucket:
+            candidates.append((counts.get(high_edge + 1, 0), high_edge + 1))
+        if not candidates:
+            break
+        chosen_count, chosen_bucket = min(candidates, key=lambda item: (-item[0], item[1]))
+        value_count += chosen_count
+        if chosen_bucket < low_edge:
+            low_edge = chosen_bucket
+        else:
+            high_edge = chosen_bucket
+    return poc_bucket, low_edge, high_edge, total_tpos, value_count
+
+
 def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Profile, tuple[TpoRow, ...]]:
     """Calculate 30m TPO visits on a zero-origin $50 grid using Option A VA expansion."""
     bars = tuple(sorted(candles, key=lambda c: c.candle_time))
@@ -208,28 +235,7 @@ def calculate_profile(session_date: date, candles: Iterable[Candle]) -> tuple[Pr
     if not counts:
         raise ValueError("no TPO rows generated")
 
-    min_bucket, max_bucket = min(counts), max(counts)
-    poc_bucket = min(counts, key=lambda b: (-counts[b], b))
-    total_tpos = sum(counts.values())
-    target = int((Decimal(total_tpos) * VALUE_AREA_FRACTION).to_integral_value(rounding=ROUND_CEILING))
-    selected = {poc_bucket}
-    value_count = counts[poc_bucket]
-    low_edge = high_edge = poc_bucket
-    while value_count < target:
-        candidates = []
-        if low_edge > min_bucket:
-            candidates.append((counts.get(low_edge - 1, 0), low_edge - 1))
-        if high_edge < max_bucket:
-            candidates.append((counts.get(high_edge + 1, 0), high_edge + 1))
-        if not candidates:
-            break
-        chosen_count, chosen_bucket = min(candidates, key=lambda item: (-item[0], item[1]))
-        selected.add(chosen_bucket)
-        value_count += chosen_count
-        if chosen_bucket < low_edge:
-            low_edge = chosen_bucket
-        else:
-            high_edge = chosen_bucket
+    poc_bucket, low_edge, high_edge, total_tpos, value_count = _calculate_poc_and_value_area(counts)
 
     rows = tuple(
         TpoRow(Decimal(bucket) * ROW_SIZE, Decimal(bucket + 1) * ROW_SIZE,
