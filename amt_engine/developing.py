@@ -1,7 +1,7 @@
 """Fail-closed developing TPO profile using the approved V1.0 grid and Decimal rules."""
 from datetime import timedelta
 from decimal import Decimal, ROUND_CEILING
-from .daily import BAR_SECONDS, EXPECTED_BARS, ROW_SIZE, VALUE_AREA_FRACTION, session_bounds, _bucket
+from .daily import BAR_SECONDS, EXPECTED_BARS, ROW_SIZE, session_bounds, _bucket, _calculate_poc_and_value_area
 
 
 def calculate_developing_profile(session_date, raw_rows):
@@ -49,26 +49,7 @@ def calculate_developing_profile(session_date, raw_rows):
     if not counts:
         return None
 
-    poc_bucket = min(counts, key=lambda bucket: (-counts[bucket], bucket))
-    total_tpos = sum(counts.values())
-    target = int((Decimal(total_tpos) * VALUE_AREA_FRACTION).to_integral_value(rounding=ROUND_CEILING))
-    low_edge = high_edge = poc_bucket
-    included = counts[poc_bucket]
-    min_bucket, max_bucket = min(counts), max(counts)
-    while included < target:
-        candidates = []
-        if low_edge > min_bucket:
-            candidates.append((counts.get(low_edge - 1, 0), low_edge - 1))
-        if high_edge < max_bucket:
-            candidates.append((counts.get(high_edge + 1, 0), high_edge + 1))
-        if not candidates:
-            break
-        chosen_count, chosen_bucket = min(candidates, key=lambda item: (-item[0], item[1]))
-        included += chosen_count
-        if chosen_bucket < low_edge:
-            low_edge = chosen_bucket
-        else:
-            high_edge = chosen_bucket
+    poc_bucket, low_edge, high_edge, total_tpos, included = _calculate_poc_and_value_area(counts)
 
     return {
         "VAL": Decimal(low_edge) * ROW_SIZE,
