@@ -109,7 +109,7 @@ def complete_profile(df, start):
         return None
     profile, rows = calculate_profile(start.date(), validated.candles)
     return {"VAL": float(profile.val_lower), "POC": float(profile.poc_lower),
-            "VAH": float(profile.vah_upper), "TPOs": profile.total_tpos, "Rows": len(rows)}
+            "VAH": float(profile.vah_upper), "TPOs": profile.total_tpos, "Rows": sum(1 for row in rows if row.tpo_count > 0)}
 
 def fmt_ts(value):
     if pd.isna(value):
