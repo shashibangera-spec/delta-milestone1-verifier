@@ -34,3 +34,17 @@
 - OI location attribution assigns each close-to-close change by confirmed PRICE close relative to composite VAH/VAL; buckets must reconcile to net OI change.
 - First-session high/low containment is separate from composite value. No acceptance/rejection or Pine v7.2.2 parity is implied.
 - Detailed table contains every paired 30m candle. SELECT-only; no collector, schema/data, alert, or Pine changes.
+
+
+## AMT Engine V1.0 developing-profile integration
+
+- The completed-session profile adapter imports the approved `amt_engine.daily` V1.0 validator and calculator from the existing approved implementation commit; the daily writer and its calculation path are not changed.
+- Developing profile is a read-only research output calculated with Decimal arithmetic, the V1.0 zero-origin $50 grid, lower-price POC tie-break and Option A one-row-at-a-time value-area expansion (including zero-count intervening rows).
+- Developing output is shown only for a contiguous prefix beginning at 00:00 UTC / 05:30 IST. Missing, duplicate, off-grid, invalid OHLC or non-prefix candles fail closed. Only rows from the confirmed candle table are passed; provisional rows remain excluded.
+- **Input-validated profile** means the candle inputs passed the exact timestamp, 48-slot completeness and OHLC checks. This describes data validity only; it is not an AMT daily acceptance decision.
+- **Calculated developing profile** means the current contiguous confirmed prefix passed validation and its POC/VAH/VAL were calculated with the approved V1.0 rules. It is an interim research output, not a completed daily profile and not accepted by the AMT Engine.
+- **Daily profile accepted by the AMT Engine** is a separate status that can only be asserted when the dashboard verifies the matching session record in the daily acceptance register. The dashboard does not currently query that register. Therefore a prior-session profile is explicitly labelled INPUT VALIDATION: PASS; PROFILE CALCULATION: COMPLETE; DAILY AMT ENGINE ACCEPTANCE: NOT VERIFIED — NOT ACCEPTED.
+- Developing and dashboard-calculated prior values are research outputs, not accepted daily records or trading signals. The timestamp open/close semantic qualification remains unchanged.
+
+
+- Controlled live-validation gates and evidence requirements are documented in [`LIVE_VALIDATION_CHECKLIST.md`](LIVE_VALIDATION_CHECKLIST.md). This is a preparation checklist only; it does not authorize merge or deployment.

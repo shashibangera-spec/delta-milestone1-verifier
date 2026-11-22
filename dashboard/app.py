@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import math
+import json
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -9,6 +10,8 @@ import psycopg
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from oi_attribution import calculate_value_area_oi_breakdown
+from amt_engine.daily import calculate_profile, validate_session
+from amt_engine.developing import calculate_developing_profile
 from session_selection import LIVE_SESSION_LABEL, normalize_session_selection, return_to_live_session
 
 st.set_page_config(page_title="BTC AMT Research Dashboard", page_icon="📊", layout="centered")
@@ -20,9 +23,17 @@ IST = timezone(timedelta(hours=5, minutes=30))
 @st.cache_resource
 def get_connection():
     url = os.environ["DATABASE_URL"]
-    conn = psycopg.connect(url, autocommit=True)
+    conn = psycopg.connect(url, autocommit=True, application_name="delta-amt-developing-staging")
     conn.execute("SET default_transaction_read_only = on")
     return conn
+
+def runtime_db_status():
+    row = get_connection().execute("""
+        SELECT current_user,
+               current_setting('default_transaction_read_only'),
+               current_setting('transaction_read_only')
+    """).fetchone()
+    return {"role": row[0], "default_read_only": row[1], "transaction_read_only": row[2]}
 
 def utc_midnight(dt):
     return dt.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -100,7 +111,53 @@ def is_complete_session(df, start):
     return len(df) == 48 and len(actual) == 48 and actual.equals(expected)
 
 def complete_profile(df, start):
-    return tpo_profile(candle_dicts(df)) if is_complete_session(df, start) else None
+    if not is_complete_session(df, start):
+        return None
+    validated = validate_session(start.date(), candle_dicts(df))
+    if not validated.valid:
+        return None
+    profile, rows = calculate_profile(start.date(), validated.candles)
+    return {"VAL": float(profile.val_lower), "POC": float(profile.poc_lower),
+            "VAH": float(profile.vah_upper), "TPOs": profile.total_tpos,
+            "Rows": sum(1 for row in rows if row.tpo_count > 0),
+            "ValueAreaTPOs": profile.value_area_tpos,
+            "ValueAreaRows": sum(1 for row in rows if row.is_value_area)}
+
+def sequence_diagnostics(frame, start):
+    """Describe the observed confirmed prefix without querying or changing source data."""
+    if frame.empty:
+        return {"missing": 0, "duplicates": 0, "invalid": 0, "off_grid": 0, "contiguous": False}
+    work = frame.copy()
+    times = pd.to_datetime(work["candle_time"], utc=True, errors="coerce")
+    bad_time = int(times.isna().sum())
+    valid_mask = times.notna()
+    work = work.loc[valid_mask].copy()
+    times = times.loc[valid_mask]
+    duplicates = int(times.duplicated(keep="first").sum())
+    off_grid_mask = (times.dt.second != 0) | (times.dt.microsecond != 0) | ((times.astype("int64") // 1_000_000_000) % 1800 != 0)
+    off_grid = int(off_grid_mask.sum())
+    invalid = bad_time
+    for _, row in work.iterrows():
+        try:
+            o, h, l, close = [float(row[k]) for k in ("open_value", "high_value", "low_value", "close_value")]
+            if not all(math.isfinite(v) for v in (o, h, l, close)) or h < l or h < max(o, close) or l > min(o, close):
+                invalid += 1
+        except (TypeError, ValueError, OverflowError):
+            invalid += 1
+    start_ts = pd.Timestamp(start)
+    latest = times.max() if not times.empty else None
+    missing = 0
+    if latest is not None and latest >= start_ts:
+        last_slot = latest.floor("30min")
+        expected = pd.date_range(start=start_ts, end=last_slot, freq="30min")
+        observed = pd.DatetimeIndex(times.drop_duplicates())
+        missing = len(expected.difference(observed))
+    contiguous = (latest is not None and times.min() == start_ts and missing == 0
+                  and duplicates == 0 and invalid == 0 and off_grid == 0
+                  and len(times) == len(times.drop_duplicates()))
+    return {"missing": missing, "duplicates": duplicates, "invalid": invalid,
+            "off_grid": off_grid, "contiguous": bool(contiguous)}
+
 
 def fmt_ts(value):
     if pd.isna(value):
@@ -112,14 +169,22 @@ def money(value):
     return "—" if value is None or pd.isna(value) else f"${float(value):,.2f}"
 
 st.title("BTC AMT Research Dashboard")
+copy_snapshot_slot = st.empty()
 st.caption("ISOLATED RESEARCH • Neon amt_research • SELECT-only database role")
+try:
+    db_status = runtime_db_status()
+    st.caption(f"RUNTIME DB SAFETY · role={db_status['role']} · default_transaction_read_only={db_status['default_read_only']} · transaction_read_only={db_status['transaction_read_only']}")
+except Exception as exc:
+    st.error(f"Runtime database safety verification failed: {exc}")
+    st.stop()
 
 @st.cache_data(ttl=45)
 def load_frames():
-    return fetch_data()
+    price_frame, provisional_frame = fetch_data()
+    return price_frame, provisional_frame, datetime.now(timezone.utc).isoformat()
 
 try:
-    price_df, provisional_df = load_frames()
+    price_df, provisional_df, data_refresh_utc = load_frames()
 except Exception as exc:
     st.error(f"Database read failed: {exc}")
     st.stop()
@@ -247,9 +312,34 @@ st.info("Research-derived AMT from completed Delta 30-minute candles. This is no
 prior = price[(price.candle_time >= prior_start) & (price.candle_time < session_start)].sort_values("candle_time")
 session_price = price[(price.candle_time >= session_start) & (price.candle_time < next_start)].sort_values("candle_time")
 session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
+price_sequence = sequence_diagnostics(session_price, session_start)
+refresh_key = f"_validation_refresh_{session_start.isoformat()}"
+comparison_key = f"_validation_comparison_{session_start.isoformat()}"
+current_refresh_state = {
+    "loaded_at_utc": data_refresh_utc,
+    "confirmed_price_count": len(session_price),
+    "latest_confirmed_price_utc": session_price.iloc[-1].candle_time.isoformat() if not session_price.empty else None,
+}
+previous_refresh_state = st.session_state.get(refresh_key)
+if previous_refresh_state is None:
+    refresh_comparison = {"available": False}
+    st.session_state[refresh_key] = current_refresh_state
+elif previous_refresh_state.get("loaded_at_utc") != data_refresh_utc:
+    refresh_comparison = {
+        "available": True,
+        "previous": previous_refresh_state,
+        "count_changed": previous_refresh_state.get("confirmed_price_count") != current_refresh_state["confirmed_price_count"],
+        "latest_changed": previous_refresh_state.get("latest_confirmed_price_utc") != current_refresh_state["latest_confirmed_price_utc"],
+    }
+    st.session_state[comparison_key] = refresh_comparison
+    st.session_state[refresh_key] = current_refresh_state
+else:
+    refresh_comparison = st.session_state.get(comparison_key, {"available": False})
 prior_profile = complete_profile(prior, prior_start)
 session_profile = complete_profile(session_price, session_start) if not is_live else None
-developing_profile = tpo_profile(candle_dicts(session_price)) if is_live else session_profile
+developing_raw = calculate_developing_profile(session_start.date(), candle_dicts(session_price)) if is_live else None
+developing_profile = ({**developing_raw, "VAL": float(developing_raw["VAL"]), "POC": float(developing_raw["POC"]),
+                      "VAH": float(developing_raw["VAH"]) } if developing_raw else None) if is_live else session_profile
 
 latest_price = session_price.iloc[-1] if not session_price.empty else None
 session_oi = oi[(oi.candle_time >= session_start) & (oi.candle_time < next_start)].sort_values("candle_time")
@@ -262,6 +352,9 @@ if prior_profile:
     st.metric("Prior POC", money(prior_profile["POC"]))
     st.metric("Prior VAL", money(prior_profile["VAL"]))
     st.metric("Prior VA Width", money(prior_profile["VAH"] - prior_profile["VAL"]))
+    st.caption("INPUT VALIDATION: PASS · 48/48 confirmed 30m PRICE candles, exact session timestamps and valid OHLC.")
+    st.caption("PROFILE CALCULATION: COMPLETE · calculated with approved AMT Engine V1.0 rules.")
+    st.caption("DAILY AMT ENGINE ACCEPTANCE: NOT VERIFIED · this dashboard does not read the daily acceptance register. NOT ACCEPTED.")
 else:
     st.warning("Prior Day profile unavailable or incomplete: the previous session must contain all 48 confirmed 30m PRICE candles. Historical dates near the start of retained history may not have a preceding session.")
 
@@ -357,13 +450,15 @@ else:
 
 st.divider()
 st.subheader("3 · " + ("DEVELOPING AMT STRUCTURE" if is_live else "COMPLETED SESSION AMT STRUCTURE"))
-st.caption("Developing levels use confirmed 30m brackets only; historical session levels require all 48 confirmed brackets.")
+st.caption("INPUT VALIDATION: A developing profile is calculated only after the confirmed candles pass contiguous-prefix, timestamp and OHLC checks from the 00:00 UTC / 05:30 IST reset. Provisional candles are excluded; missing, duplicate, off-grid, invalid or interrupted sequences are withheld.")
+st.caption("PROFILE CALCULATION: DEVELOPING · calculated research output using approved AMT Engine V1.0 rules; not a completed daily profile.")
+st.caption("DAILY AMT ENGINE ACCEPTANCE: NOT APPLICABLE · the session is still developing. This output is NOT ACCEPTED as a daily profile.")
 if developing_profile:
     a,b,c = st.columns(3)
     a.metric("Developing VAL" if is_live else "Session VAL", money(developing_profile["VAL"]))
     b.metric("Developing POC" if is_live else "Session POC", money(developing_profile["POC"]))
     c.metric("Developing VAH" if is_live else "Session VAH", money(developing_profile["VAH"]))
-    st.caption(f"Confirmed brackets: {len(session_price):,} / 48 · TPO counts: {developing_profile['TPOs']:,} · Occupied $50 rows: {developing_profile['Rows']:,}")
+    st.caption(f"INPUT VALIDATION: PASS · {developing_profile.get('ConfirmedBrackets', len(session_price)):,} contiguous confirmed brackets · {developing_profile['TPOs']:,} TPOs · {developing_profile['Rows']:,} occupied $50 rows.")
     if prior_profile and is_live:
         width_delta = (developing_profile["VAH"]-developing_profile["VAL"]) - (prior_profile["VAH"]-prior_profile["VAL"])
         st.metric("VA Expansion vs Prior", money(width_delta), help="Difference in value-area width; positive means wider, negative means narrower.")
@@ -407,3 +502,163 @@ else:
 
 st.caption(f"Selected session: {len(price_session):,} confirmed PRICE and {len(oi_session):,} confirmed OI candles. " + ("Automatic refresh: every 45 seconds (live mode)." if is_live else "Auto-refresh paused (historical mode).") + " All times shown in IST unless explicitly marked UTC.")
 st.caption("TPO method: each confirmed 30m candle contributes one count to every $50 row touched from low through high (inclusive); POC is the most-counted row (lower row wins ties); 70% value area expands to the higher-count adjacent row, with ties expanding lower. Research prototype pending Pine parity validation.")
+
+# Build the export only after every displayed value for this run has been derived.
+# It reads the same in-memory frames/profile objects used above and performs no DB query.
+snapshot_now = datetime.now(timezone.utc)
+snapshot_ist = snapshot_now.astimezone(IST)
+prov_snapshot = provisional_df[
+    (provisional_df.series_type == "PRICE") & (provisional_df.symbol == "BTCUSD")
+].copy() if not provisional_df.empty else pd.DataFrame()
+if not prov_snapshot.empty:
+    prov_snapshot_times = pd.to_datetime(prov_snapshot["candle_time"], utc=True)
+    prov_snapshot = prov_snapshot[(prov_snapshot_times >= pd.Timestamp(session_start)) & (prov_snapshot_times < pd.Timestamp(next_start))]
+if not prov_snapshot.empty:
+    prov_row = prov_snapshot.sort_values("candle_time", ascending=False).iloc[0]
+    provisional_ts_utc = pd.Timestamp(prov_row.candle_time).isoformat()
+    provisional_ts_ist = fmt_ts(prov_row.candle_time)
+    provisional_status = str(prov_row.status)
+else:
+    provisional_ts_utc = "NONE"
+    provisional_ts_ist = "NONE"
+    provisional_status = "NO PROVISIONAL PRICE CANDLE"
+first_price_ts = session_price.iloc[0].candle_time if not session_price.empty else None
+latest_price_ts = session_price.iloc[-1].candle_time if not session_price.empty else None
+latest_oi_ts = session_oi.iloc[-1].candle_time if not session_oi.empty else None
+prior_session_date = prior_start.date().isoformat()
+prior_input_status = "PASS · 48/48 exact confirmed candles and valid OHLC" if prior_profile else "NOT VERIFIED · prior complete profile unavailable"
+prior_calculation_status = "COMPLETE · AMT Engine V1.0" if prior_profile else "NOT CALCULATED"
+prior_acceptance_status = "NOT VERIFIED · dashboard does not read the daily acceptance register; NOT ACCEPTED"
+developing_input_status = "PASS · contiguous confirmed prefix" if developing_profile and price_sequence["contiguous"] else "NOT VERIFIED / FAIL-CLOSED · sequence/profile unavailable"
+developing_calculation_status = "CALCULATED · INTERIM RESEARCH OUTPUT" if developing_profile else "NOT CALCULATED · fail-closed"
+provisional_exclusion = "YES · developing calculation receives confirmed PRICE rows only; provisional table is separate" if developing_profile else "NOT VERIFIED · developing profile unavailable"
+commit_sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "NOT AVAILABLE")
+deployment_id = os.environ.get("RAILWAY_DEPLOYMENT_ID", "NOT AVAILABLE")
+refresh_interval = "45 seconds (live auto-refresh)" if is_live else "PAUSED (historical session)"
+if refresh_comparison.get("available"):
+    prev_state = refresh_comparison["previous"]
+    prev_latest = prev_state.get("latest_confirmed_price_utc") or "NONE"
+    count_change_text = "YES" if refresh_comparison["count_changed"] else "NO"
+    latest_change_text = "YES" if refresh_comparison["latest_changed"] else "NO"
+else:
+    prev_latest = "NOT VERIFIED · no earlier refresh retained in this browser session"
+    count_change_text = "NOT VERIFIED"
+    latest_change_text = "NOT VERIFIED"
+def snapshot_money(value):
+    return "NOT AVAILABLE" if value is None else "$" + format(float(value), ",.2f")
+snapshot_lines = [
+    "BTC AMT RESEARCH DASHBOARD — VALIDATION SNAPSHOT",
+    "Generated UTC: " + snapshot_now.isoformat(),
+    "Generated IST: " + snapshot_ist.strftime("%Y-%m-%d %H:%M:%S %Z"),
+    "",
+    "A. DEPLOYMENT AND RUNTIME",
+    "Dashboard: BTC AMT Research Dashboard",
+    "Environment: ISOLATED STAGING",
+    "Git commit SHA: " + commit_sha,
+    "Deployment identifier: " + deployment_id,
+    "Database runtime role: " + str(db_status.get("role", "NOT VERIFIED")),
+    "default_transaction_read_only: " + str(db_status.get("default_read_only", "NOT VERIFIED")),
+    "transaction_read_only: " + str(db_status.get("transaction_read_only", "NOT VERIFIED")),
+    "",
+    "B. SESSION AND SOURCE DATA",
+    "Session date (UTC): " + session_start.date().isoformat(),
+    "Reset boundary: " + session_start.strftime("%Y-%m-%d 00:00:00 UTC") + " / " + session_start.astimezone(IST).strftime("%Y-%m-%d 05:30:00 IST"),
+    "Confirmed PRICE candle count: " + str(len(session_price)),
+    "First confirmed PRICE candle: " + (pd.Timestamp(first_price_ts).isoformat() + " / " + fmt_ts(first_price_ts) if first_price_ts is not None else "NOT AVAILABLE"),
+    "Latest confirmed PRICE candle: " + (pd.Timestamp(latest_price_ts).isoformat() + " / " + fmt_ts(latest_price_ts) if latest_price_ts is not None else "NOT AVAILABLE"),
+    "Provisional PRICE candle: " + provisional_ts_utc + " / " + provisional_ts_ist,
+    "Provisional PRICE status: " + provisional_status,
+    "Confirmed OI candle count: " + str(len(session_oi)),
+    "Latest confirmed OI candle: " + (pd.Timestamp(latest_oi_ts).isoformat() + " / " + fmt_ts(latest_oi_ts) if latest_oi_ts is not None else "NOT AVAILABLE"),
+    "Missing candle count (observed prefix through latest slot): " + str(price_sequence["missing"]),
+    "Duplicate candle count (extra duplicate rows): " + str(price_sequence["duplicates"]),
+    "Invalid OHLC/timestamp count: " + str(price_sequence["invalid"]),
+    "Off-grid candle count: " + str(price_sequence["off_grid"]),
+    "Confirmed PRICE sequence contiguous: " + ("YES" if price_sequence["contiguous"] else "NO / NOT VERIFIED"),
+    "",
+    "C. DEVELOPING PROFILE",
+    "VAL: " + (snapshot_money(developing_profile["VAL"]) if developing_profile else "NOT AVAILABLE"),
+    "POC: " + (snapshot_money(developing_profile["POC"]) if developing_profile else "NOT AVAILABLE"),
+    "VAH: " + (snapshot_money(developing_profile["VAH"]) if developing_profile else "NOT AVAILABLE"),
+    "VA width: " + (snapshot_money(developing_profile["VAH"] - developing_profile["VAL"]) if developing_profile else "NOT AVAILABLE"),
+    "Total TPO visits: " + (str(developing_profile["TPOs"]) if developing_profile else "NOT AVAILABLE"),
+    "Occupied row count: " + (str(developing_profile["Rows"]) if developing_profile else "NOT AVAILABLE"),
+    "Value-area TPO visits: " + (str(developing_profile.get("ValueAreaTPOs", "NOT AVAILABLE")) if developing_profile else "NOT AVAILABLE"),
+    "Value-area row count (includes zero-count rows in contiguous VA): " + (str(developing_profile.get("ValueAreaRows", "NOT AVAILABLE")) if developing_profile else "NOT AVAILABLE"),
+    "Profile input validation status: " + developing_input_status,
+    "Profile calculation status: " + developing_calculation_status,
+    "Provisional candles excluded: " + provisional_exclusion,
+    "",
+    "D. PRIOR COMPLETED PROFILE",
+    "Prior session date: " + prior_session_date,
+    "Prior VAL: " + (snapshot_money(prior_profile["VAL"]) if prior_profile else "NOT AVAILABLE"),
+    "Prior POC: " + (snapshot_money(prior_profile["POC"]) if prior_profile else "NOT AVAILABLE"),
+    "Prior VAH: " + (snapshot_money(prior_profile["VAH"]) if prior_profile else "NOT AVAILABLE"),
+    "Prior input validation status: " + prior_input_status,
+    "Prior calculation status: " + prior_calculation_status,
+    "Daily AMT Engine acceptance status: " + prior_acceptance_status,
+    "",
+    "E. REFRESH DIAGNOSTICS",
+    "Last successful data refresh timestamp (UTC): " + data_refresh_utc,
+    "Current refresh interval: " + refresh_interval,
+    "Latest confirmed PRICE timestamp at previous refresh (UTC): " + str(prev_latest),
+    "Confirmed candle count changed since previous refresh: " + count_change_text,
+    "Latest confirmed timestamp changed since previous refresh: " + latest_change_text,
+    "Current provisional PRICE candle timestamp (UTC): " + provisional_ts_utc,
+    "",
+    "F. METHOD AND QUALIFICATIONS",
+    "$50 global zero-origin row grid",
+    "Inclusive OHLC TPO allocation: each confirmed 30m candle visits every row from low through high, inclusive",
+    "POC tie-break: lower-priced row",
+    "Value area: 70% of TPO visits; approved Option A expands one row at a time to the higher-count adjacent row, lower-priced row on tie, including zero-count rows between occupied rows",
+    "Developing profile is interim research output only; NOT an accepted daily profile",
+    "Dashboard calculation is not Pine v7.2.2 parity certification",
+    "",
+    "Evidence rule: unavailable diagnostics are labelled NOT VERIFIED; no database secrets or personal information are included."
+]
+validation_snapshot = "\n".join(snapshot_lines)
+snapshot_json = json.dumps(validation_snapshot).replace("</", "<\\/")
+copy_component = """
+<div style="font-family:sans-serif;">
+  <button id="copy-validation-snapshot" style="background:#2563eb;color:white;border:0;border-radius:7px;padding:11px 16px;font-weight:700;cursor:pointer;">
+    COPY VALIDATION SNAPSHOT
+  </button>
+  <span id="copy-validation-status" role="status" aria-live="polite" style="margin-left:10px;font-size:13px;"></span>
+</div>
+<script>
+const snapshotText = SNAPSHOT_JSON;
+const button = document.getElementById("copy-validation-snapshot");
+const status = document.getElementById("copy-validation-status");
+button.addEventListener("click", async () => {
+  status.textContent = "Copying…";
+  try {
+    await navigator.clipboard.writeText(snapshotText);
+    status.textContent = "Copied successfully — paste into ChatGPT.";
+    status.style.color = "#15803d";
+  } catch (error) {
+    try {
+      const field = document.createElement("textarea");
+      field.value = snapshotText;
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      const copied = document.execCommand("copy");
+      field.remove();
+      if (!copied) throw new Error("Clipboard permission unavailable");
+      status.textContent = "Copied successfully — paste into ChatGPT.";
+      status.style.color = "#15803d";
+    } catch (fallbackError) {
+      status.textContent = "Copy failed. Use the plain-text snapshot below.";
+      status.style.color = "#b91c1c";
+    }
+  }
+});
+</script>
+""".replace("SNAPSHOT_JSON", snapshot_json)
+with copy_snapshot_slot.container():
+    st.components.v1.html(copy_component, height=54, scrolling=False)
+with st.expander("Validation snapshot · plain text (manual copy fallback)", expanded=False):
+    st.text_area("Snapshot text", value=validation_snapshot, height=420, label_visibility="collapsed")
+
