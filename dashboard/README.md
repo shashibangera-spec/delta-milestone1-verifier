@@ -45,3 +45,6 @@
 - **Calculated developing profile** means the current contiguous confirmed prefix passed validation and its POC/VAH/VAL were calculated with the approved V1.0 rules. It is an interim research output, not a completed daily profile and not accepted by the AMT Engine.
 - **Daily profile accepted by the AMT Engine** is a separate status that can only be asserted when the dashboard verifies the matching session record in the daily acceptance register. The dashboard does not currently query that register. Therefore a prior-session profile is explicitly labelled INPUT VALIDATION: PASS; PROFILE CALCULATION: COMPLETE; DAILY AMT ENGINE ACCEPTANCE: NOT VERIFIED — NOT ACCEPTED.
 - Developing and dashboard-calculated prior values are research outputs, not accepted daily records or trading signals. The timestamp open/close semantic qualification remains unchanged.
+
+
+- Controlled live-validation gates and evidence requirements are documented in [`LIVE_VALIDATION_CHECKLIST.md`](LIVE_VALIDATION_CHECKLIST.md). This is a preparation checklist only; it does not authorize merge or deployment.
