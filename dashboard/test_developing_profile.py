@@ -46,7 +46,9 @@ class DevelopingProfileTests(unittest.TestCase):
         rows = [self.row(i, "100", "200") for i in range(7)]
         result = calculate_developing_profile(self.day, rows)
         self.assertEqual(result["ConfirmedBrackets"], 7)
-        self.assertIn("UNVALIDATED", result["ProfileStatus"])
+        self.assertEqual(result["InputValidationStatus"], "PASS · CONTIGUOUS CONFIRMED PREFIX")
+        self.assertEqual(result["ProfileCalculationStatus"], "DEVELOPING · CALCULATED · RESEARCH OUTPUT")
+        self.assertEqual(result["DailyAcceptanceStatus"], "NOT APPLICABLE · NOT ACCEPTED")
 
     def test_missing_middle_slot_fails_closed(self):
         rows = [self.row(i, "100", "200") for i in range(7)]
