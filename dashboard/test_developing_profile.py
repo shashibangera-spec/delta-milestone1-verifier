@@ -79,12 +79,17 @@ class DevelopingProfileTests(unittest.TestCase):
         raw = [self.row(i, "100", "200") for i in range(EXPECTED_BARS)]
         validation = validate_session(self.day, raw)
         self.assertTrue(validation.valid, validation.report)
-        approved_profile, _ = calculate_profile(self.day, validation.candles)
+        approved_profile, approved_rows = calculate_profile(self.day, validation.candles)
         developing = calculate_developing_profile(self.day, raw)
         self.assertEqual(developing["VAL"], approved_profile.val_lower)
         self.assertEqual(developing["POC"], approved_profile.poc_lower)
         self.assertEqual(developing["VAH"], approved_profile.vah_upper)
         self.assertEqual(developing["TPOs"], approved_profile.total_tpos)
+        self.assertEqual(developing["ValueAreaTPOs"], approved_profile.value_area_tpos)
+        self.assertEqual(
+            developing["ValueAreaRows"],
+            sum(1 for row in approved_rows if row.is_value_area),
+        )
 
 
     def test_live_read_only_2026_11_22_confirmed_snapshot_matches_independent_decimal_fixture(self):
