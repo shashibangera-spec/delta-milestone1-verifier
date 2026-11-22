@@ -168,6 +168,17 @@ class DailyWriterTests(unittest.TestCase):
             daily_job.validate_session_closed(date(2026, 11, 21), datetime(2026, 11, 21, 23, 59, tzinfo=timezone.utc))
         daily_job.validate_session_closed(date(2026, 11, 21), datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc))
 
+    def test_direct_process_call_rejects_open_session_before_identity_or_writes(self):
+        conn = FakeConnection()
+        open_session = date(2026, 11, 21)
+        before_close = datetime(2026, 11, 21, 23, 59, tzinfo=timezone.utc)
+        with self.assertRaisesRegex(RuntimeError, "not fully closed"):
+            daily_job.process_session(conn, open_session, now=before_close)
+        self.assertEqual(conn.run_inserts, [])
+        self.assertEqual(conn.profile_inserts, [])
+        self.assertEqual(conn.tpo_inserts, [])
+        self.assertEqual(conn.commit_count, 0)
+
     def test_unexpected_runtime_identity_fails_closed_before_any_writes(self):
         conn = FakeConnection(identity={"database_name": "amt_research", "current_user": "amt_research_owner", "session_user": "amt_engine_writer"})
         with self.assertRaisesRegex(RuntimeError, "Runtime database identity check failed"):
