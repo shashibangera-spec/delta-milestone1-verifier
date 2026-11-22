@@ -2,6 +2,11 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY dashboard/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+RUN mkdir -p ./amt_engine
+COPY amt_engine/__init__.py ./amt_engine/__init__.py
+COPY amt_engine/daily.py ./amt_engine/daily.py
+COPY amt_engine/developing.py ./amt_engine/developing.py
+COPY dashboard/test_developing_profile.py ./test_developing_profile.py
 COPY dashboard/test_tpo.py ./test_tpo.py
 COPY dashboard/oi_attribution.py ./oi_attribution.py
 COPY dashboard/multi_day_research.py ./multi_day_research.py
