@@ -34,3 +34,12 @@
 - OI location attribution assigns each close-to-close change by confirmed PRICE close relative to composite VAH/VAL; buckets must reconcile to net OI change.
 - First-session high/low containment is separate from composite value. No acceptance/rejection or Pine v7.2.2 parity is implied.
 - Detailed table contains every paired 30m candle. SELECT-only; no collector, schema/data, alert, or Pine changes.
+
+
+## AMT Engine V1.0 developing-profile integration
+
+- The completed-session profile adapter imports the approved `amt_engine.daily` V1.0 validator and calculator from the existing approved implementation commit; the daily writer and its calculation path are not changed.
+- Developing profile is a read-only research output calculated with Decimal arithmetic, the V1.0 zero-origin $50 grid, lower-price POC tie-break and Option A one-row-at-a-time value-area expansion (including zero-count intervening rows).
+- Developing output is shown only for a contiguous prefix beginning at 00:00 UTC / 05:30 IST. Missing, duplicate, off-grid, invalid OHLC or non-prefix candles fail closed. Only rows from the confirmed candle table are passed; provisional rows remain excluded.
+- A prior profile shown by the dashboard is **CALCULATED ONLY** from 48 confirmed candles. The dashboard does not query the daily validation/acceptance register, so it must not be described as a validated or accepted daily reference.
+- Developing and dashboard-calculated prior values are research outputs, not accepted daily records or trading signals. The timestamp open/close semantic qualification remains unchanged.
