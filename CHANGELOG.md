@@ -54,3 +54,8 @@
 - Enforce the completed UTC-session boundary inside the daily writer entrypoint as well as the CLI, so direct callers cannot bypass the 48-candle session-close requirement.
 - Add a focused offline regression test confirming an open-session direct call exits before identity checks or any database writes.
 - No calculation methodology, source data, schema, collector, dashboard, Pine, or production systems changed.
+
+## AMT Engine V1.0 persistence verification coverage
+- Strengthen the offline writer transaction fake so rollback removes the profile insert, all TPO inserts, and the in-transaction SUCCEEDED audit update before the separate FAILED audit update is recorded.
+- Add the writer test file to pull-request workflow path filters so changes to daily writer behavior cannot bypass the offline test workflow.
+- No runtime calculation, methodology, database, schema, collector, dashboard, Pine, or production changes.
