@@ -26,6 +26,8 @@ SYMBOL = "BTCUSD"
 RESOLUTION = "30m"
 TIMESTAMP_CONVENTION = "OPEN"
 OI_UNITS = "BTC"
+CANDLE_INTERVAL = timedelta(minutes=30)
+POST_CLOSE_INGESTION_GRACE = timedelta(minutes=10)
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_HOSTS = {
     "ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech",
@@ -166,8 +168,21 @@ def validate_envelope(payload: dict, now: datetime | None = None, test_mode: boo
                 raise ValueError(f"{label} timestamp is not one of the 48 exact OPEN slots")
             available = _parse_aware(rec["source_available_at"], f"{label}.source_available_at")
             ingested = _parse_aware(rec["ingested_at"], f"{label}.ingested_at")
-            if available > cutoff or ingested > cutoff:
-                raise ValueError(f"{label} record arrived after the session cutoff")
+            candle_close = ts + CANDLE_INTERVAL
+            if candle_close > cutoff:
+                raise ValueError(
+                    f"{label} candle extends beyond the closed session cutoff"
+                )
+            if available > cutoff:
+                raise ValueError(
+                    f"{label} source data became available after the session cutoff"
+                )
+            ingestion_deadline = cutoff + POST_CLOSE_INGESTION_GRACE
+            if ingested > ingestion_deadline:
+                raise ValueError(
+                    f"{label} record was ingested after the "
+                    f"{POST_CLOSE_INGESTION_GRACE} post-close grace window"
+                )
             seen.append(ts)
         if len(set(seen)) != len(seen):
             raise ValueError(f"{label} contains duplicate candle OPEN timestamps")
