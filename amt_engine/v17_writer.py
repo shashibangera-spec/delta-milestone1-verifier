@@ -199,6 +199,12 @@ def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
             (json.dumps(calculation), SYMBOL, SOURCE, json.dumps(audit)),
         )
         bundle = cur.fetchone()[0]
+        # The V1.7 adapter validates a unified adapter input using the base symbol.
+        # The persisted source-audit contract distinguishes OI as OI:<symbol>.
+        # Apply that canonical persisted identity only after adapter validation.
+        for receipt in bundle.get("source_audit", []):
+            if receipt.get("series_type") == "OI":
+                receipt["symbol"] = f"OI:{SYMBOL}"
         # Defense in depth: verify the calculation explicitly preserved verified BTC OI.
         oi_context = calculation.get("oi_context") or {}
         if oi_verified and oi_context.get("units_verified") is not True:
