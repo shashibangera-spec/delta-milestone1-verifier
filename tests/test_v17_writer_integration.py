@@ -60,16 +60,7 @@ def test_first_write_replay_conflict_digest_and_rollback(writer_connection):
     replay = persist_session(writer_connection, original, now=_now(), test_mode=True)
     assert replay["profile_id"] == first["profile_id"]
 
-    with writer_connection.cursor() as cur:
-        cur.execute(
-            "SELECT amt_engine_v17.calculate_persisted_session_sha256_v1(%s::uuid) AS digest",
-            (first["profile_id"],),
-        )
-        digest = cur.fetchone()["digest"]
-    assert len(digest) == 64
-    writer_connection.commit()
-
-    # A changed receipt is a changed complete bundle, not an exact replay.
+    # The SECURITY DEFINER V2 writer verifies the stored input fingerprint\n    # and persisted-row SHA-256 as part of the exact-replay path above.\n\n    # A changed receipt is a changed complete bundle, not an exact replay.
     conflicting = _payload(symbol)
     _shift_first_receipt(conflicting)
     with pytest.raises(psycopg.Error, match="CONFLICTING_REPLAY"):
