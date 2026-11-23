@@ -22,7 +22,7 @@ from test_v17_writer import _payload
 def writer_connection():
     url = os.environ.get("V17_DEV_DATABASE_URL")
     if not url:
-        pytest.skip("V17_DEV_DATABASE_URL secret is not configured")
+        pytest.fail("V17_DEV_DATABASE_URL secret is required; integration tests must not silently skip")
     validate_target_environment({
         "NEON_PROJECT_ID": os.environ.get("NEON_PROJECT_ID", ""),
         "NEON_BRANCH_ID": os.environ.get("NEON_BRANCH_ID", ""),
