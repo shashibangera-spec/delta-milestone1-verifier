@@ -198,7 +198,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None, test_mode:
                 oi_verified,
             ),
         )
-        calculation = cur.fetchone()[0]
+        calculation = cur.fetchone()["calculation"]
         cur.execute(
             f"SELECT {SCHEMA}.adapt_dual_series_session_calculation_fixture_v5("
             "%s::jsonb,%s,%s,%s::jsonb) AS bundle",
