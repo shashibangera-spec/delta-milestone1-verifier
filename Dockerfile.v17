@@ -1,0 +1,18 @@
+# Dedicated V1.7 runner image. Deliberately excludes the existing collector.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY amt_engine ./amt_engine
+
+# The process runs non-root. Runtime input files should be mounted read-only.
+USER 10001:10001
+
+# Inert by default: no DB connection, no input file read, no writes.
+CMD ["python", "-m", "amt_engine.v17_service", "idle"]
