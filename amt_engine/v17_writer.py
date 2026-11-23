@@ -217,7 +217,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None, test_mode:
             raise RuntimeError("Calculation did not preserve verified BTC OI units")
         cur.execute(
             f"SELECT {SCHEMA}.persist_idempotent_dual_series_bundle_fixture_v2("
-            "%s::jsonb,false) AS profile_id",
+            "%s::jsonb,%s) AS profile_id",
             (json.dumps(bundle), test_mode),
         )
         profile_id = cur.fetchone()["profile_id"]
