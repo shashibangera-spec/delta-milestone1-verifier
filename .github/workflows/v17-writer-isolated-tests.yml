@@ -6,7 +6,10 @@ on:
       - feat/amt-v17-least-priv-writer-dev
     paths:
       - "amt_engine/v17_writer.py"
+      - "amt_engine/v17_service.py"
+      - "Dockerfile.v17"
       - "tests/test_v17_writer.py"
+      - "tests/test_v17_service.py"
       - "tests/test_v17_writer_integration.py"
       - ".github/workflows/v17-writer-isolated-tests.yml"
       - "requirements.txt"
@@ -42,8 +45,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest==8.3.4
       - name: Compile runner and tests
-        run: python -m compileall -q amt_engine/v17_writer.py tests/test_v17_writer.py tests/test_v17_writer_integration.py
+        run: python -m compileall -q amt_engine/v17_writer.py amt_engine/v17_service.py tests/test_v17_writer.py tests/test_v17_service.py tests/test_v17_writer_integration.py
       - name: Run offline boundary and identity tests
-        run: python -m pytest -q tests/test_v17_writer.py
+        run: python -m pytest -q tests/test_v17_writer.py tests/test_v17_service.py
+      - name: Build dedicated V1.7 Docker image
+        run: docker build --file Dockerfile.v17 --tag amt-v17-runner:ci .
+      - name: Verify image default command is inert
+        run: python -c "import json,subprocess; cmd=json.loads(subprocess.check_output(['docker','image','inspect','amt-v17-runner:ci','--format','{{json .Config.Cmd}}'],text=True)); assert cmd == ['python','-m','amt_engine.v17_service','idle'], cmd"
       - name: Run isolated Neon integration tests
         run: python -m pytest -q -rs tests/test_v17_writer_integration.py
