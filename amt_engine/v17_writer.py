@@ -29,6 +29,7 @@ OI_UNITS = "BTC"
 IST = ZoneInfo("Asia/Kolkata")
 ALLOWED_HOSTS = {
     "ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech",
+    "ep-old-bar-aoau4qop-pooler.c-2.ap-southeast-1.aws.neon.tech",
     "ep-old-bar-aoau4qop-cqp.c-2.ap-southeast-1.aws.neon.tech",
 }
 
