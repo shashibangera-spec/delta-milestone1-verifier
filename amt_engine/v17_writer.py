@@ -204,7 +204,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None, test_mode:
             "%s::jsonb,%s,%s,%s::jsonb) AS bundle",
             (json.dumps(calculation), payload["symbol"], SOURCE, json.dumps(audit)),
         )
-        bundle = cur.fetchone()[0]
+        bundle = cur.fetchone()["bundle"]
         # The V1.7 adapter validates a unified adapter input using the base symbol.
         # The persisted source-audit contract distinguishes OI as OI:<symbol>.
         # Apply that canonical persisted identity only after adapter validation.
