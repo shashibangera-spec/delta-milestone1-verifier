@@ -221,7 +221,6 @@ def persist_session(conn, payload: dict, now: datetime | None = None, test_mode:
             (json.dumps(bundle), test_mode),
         )
         profile_id = cur.fetchone()["profile_id"]
-    conn.commit()
     return {
         "status": "PERSISTED",
         "profile_id": str(profile_id),
