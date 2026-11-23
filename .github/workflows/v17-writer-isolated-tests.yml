@@ -6,6 +6,7 @@ on:
       - feat/amt-v17-least-priv-writer-dev
     paths:
       - "amt_engine/v17_writer.py"
+      - "V17_METHOD_NOTES.md"
       - "amt_engine/v17_service.py"
       - "Dockerfile.v17"
       - "tests/test_v17_writer.py"
