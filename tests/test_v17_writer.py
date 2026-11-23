@@ -107,3 +107,53 @@ def test_cutoff_must_equal_exact_session_end():
     payload["cutoff_at"] = "2026-11-23T00:00:01+00:00"
     with pytest.raises(ValueError, match="must equal"):
         validate_envelope(payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc))
+
+def test_closed_48_candle_envelope_accepts_post_close_ingestion_within_grace():
+    payload = _payload()
+    cutoff = datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc)
+    # Last candle is 23:30–00:00 UTC: its OPEN timestamp is 23:30,
+    # and its close is exactly the session cutoff. REST retrieval follows close.
+    for records in (payload["price_records"], payload["oi_records"]):
+        records[-1]["ingested_at"] = (
+            cutoff + timedelta(seconds=38, milliseconds=497)
+        ).isoformat()
+    session_date, validated_cutoff, price, oi, _, _ = validate_envelope(
+        payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc)
+    )
+    assert session_date == date(2026, 11, 22)
+    assert validated_cutoff == cutoff
+    assert len(price) == 48
+    assert len(oi) == 48
+    assert max(
+        datetime.fromisoformat(r["timestamp"]) + timedelta(minutes=30)
+        for r in price
+    ) == cutoff
+
+
+def test_post_close_ingestion_after_ten_minute_grace_is_rejected():
+    payload = _payload()
+    cutoff = datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc)
+    payload["price_records"][-1]["ingested_at"] = (
+        cutoff + timedelta(minutes=10, milliseconds=1)
+    ).isoformat()
+    with pytest.raises(ValueError, match="post-close grace window"):
+        validate_envelope(payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc))
+
+
+def test_source_availability_after_cutoff_is_still_rejected():
+    payload = _payload()
+    cutoff = datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc)
+    payload["price_records"][-1]["source_available_at"] = (
+        cutoff + timedelta(seconds=1)
+    ).isoformat()
+    with pytest.raises(ValueError, match="source data became available"):
+        validate_envelope(payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc))
+
+
+def test_candle_extending_past_cutoff_is_rejected():
+    payload = _payload()
+    # Replace final 23:30 OPEN with 23:30:00.001: it is not a valid slot,
+    # and explicitly demonstrates that a candle cannot close after cutoff.
+    payload["price_records"][-1]["timestamp"] = "2026-11-22T23:30:00.001+00:00"
+    with pytest.raises(ValueError, match="not one of the 48 exact OPEN slots"):
+        validate_envelope(payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc))
