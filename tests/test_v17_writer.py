@@ -100,3 +100,10 @@ def test_production_envelope_rejects_non_open_timestamps():
     payload["timestamp_convention"] = "CLOSE"
     with pytest.raises(ValueError, match="candle OPEN"):
         validate_envelope(payload, datetime(2026, 11, 24, tzinfo=timezone.utc))
+
+
+def test_cutoff_must_equal_exact_session_end():
+    payload = _payload()
+    payload["cutoff_at"] = "2026-11-23T00:00:01+00:00"
+    with pytest.raises(ValueError, match="must equal"):
+        validate_envelope(payload, datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc))
