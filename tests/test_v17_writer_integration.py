@@ -67,6 +67,7 @@ def test_first_write_replay_conflict_digest_and_rollback(writer_connection):
         )
         digest = cur.fetchone()["digest"]
     assert len(digest) == 64
+    writer_connection.commit()
 
     # A changed receipt is a changed complete bundle, not an exact replay.
     conflicting = _payload(symbol)
