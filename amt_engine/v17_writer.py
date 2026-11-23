@@ -136,8 +136,8 @@ def validate_envelope(payload: dict, now: datetime | None = None, test_mode: boo
     start, end = session_bounds_utc(session_date)
     cutoff = _parse_aware(payload["cutoff_at"], "cutoff_at")
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    if cutoff < end:
-        raise ValueError("Session cutoff precedes the 05:30 IST / 00:00 UTC session boundary")
+    if cutoff != end:
+        raise ValueError("Session cutoff must equal the 05:30 IST / 00:00 UTC session boundary")
     if cutoff > current:
         raise ValueError("Session cutoff cannot be in the future")
     if current < end:
