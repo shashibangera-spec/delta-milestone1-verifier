@@ -95,7 +95,7 @@ def _parse_aware(value: str, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _source_audit(records: list[dict], series_type: str) -> list[dict]:
+def _source_audit(records: list[dict], series_type: str, symbol: str = SYMBOL) -> list[dict]:
     audit = []
     for record in records:
         ts = _parse_aware(record["timestamp"], f"{series_type}.timestamp")
@@ -104,7 +104,7 @@ def _source_audit(records: list[dict], series_type: str) -> list[dict]:
         audit.append({
             "candle_id": record.get("candle_id") or f"{series_type}|{ts:%Y%m%d%H%M%S}",
             "source": SOURCE,
-            "symbol": SYMBOL,
+            "symbol": symbol,
             "series_type": series_type,
             "resolution": RESOLUTION,
             "timestamp_convention": TIMESTAMP_CONVENTION,
@@ -117,9 +117,15 @@ def _source_audit(records: list[dict], series_type: str) -> list[dict]:
     return audit
 
 
-def validate_envelope(payload: dict, now: datetime | None = None) -> tuple[date, datetime, list, list, list, list]:
-    if payload.get("source") != SOURCE or payload.get("symbol") != SYMBOL:
-        raise ValueError("Only Delta India BTCUSD inputs are accepted by this runner")
+def validate_envelope(payload: dict, now: datetime | None = None, test_mode: bool = False) -> tuple[date, datetime, list, list, list, list]:
+    symbol = payload.get("symbol")
+    if payload.get("source") != SOURCE:
+        raise ValueError("Only Delta India inputs are accepted by this runner")
+    if test_mode:
+        if not isinstance(symbol, str) or not symbol.startswith("TEST_"):
+            raise ValueError("Database test mode is restricted to TEST_ symbols")
+    elif symbol != SYMBOL:
+        raise ValueError("Production runner accepts only BTCUSD")
     if payload.get("resolution") != RESOLUTION:
         raise ValueError("Only 30m inputs are accepted")
     if payload.get("timestamp_convention") != TIMESTAMP_CONVENTION:
@@ -170,13 +176,13 @@ def validate_envelope(payload: dict, now: datetime | None = None) -> tuple[date,
     if oi and {r["timestamp"] for r in oi} != {r["timestamp"] for r in price}:
         raise ValueError("PRICE and OI candle OPEN timestamps are not paired")
 
-    audit = _source_audit(price, "PRICE") + _source_audit(oi, "OI")
+    audit = _source_audit(price, "PRICE", symbol) + _source_audit(oi, "OI", symbol)
     return session_date, cutoff, price, oi, prior, audit
 
 
-def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
+def persist_session(conn, payload: dict, now: datetime | None = None, test_mode: bool = False) -> dict:
     identity = verify_database_identity(conn)
-    session_date, cutoff, price, oi, prior, audit = validate_envelope(payload, now)
+    session_date, cutoff, price, oi, prior, audit = validate_envelope(payload, now, test_mode)
     oi_verified = bool(oi) and payload.get("oi_units_verified") is True
 
     with conn.cursor() as cur:
@@ -196,7 +202,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
         cur.execute(
             f"SELECT {SCHEMA}.adapt_dual_series_session_calculation_fixture_v5("
             "%s::jsonb,%s,%s,%s::jsonb) AS bundle",
-            (json.dumps(calculation), SYMBOL, SOURCE, json.dumps(audit)),
+            (json.dumps(calculation), payload["symbol"], SOURCE, json.dumps(audit)),
         )
         bundle = cur.fetchone()[0]
         # The V1.7 adapter validates a unified adapter input using the base symbol.
@@ -204,7 +210,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
         # Apply that canonical persisted identity only after adapter validation.
         for receipt in bundle.get("source_audit", []):
             if receipt.get("series_type") == "OI":
-                receipt["symbol"] = f"OI:{SYMBOL}"
+                receipt["symbol"] = "OI:" + payload["symbol"]
         # Defense in depth: verify the calculation explicitly preserved verified BTC OI.
         oi_context = calculation.get("oi_context") or {}
         if oi_verified and oi_context.get("units_verified") is not True:
@@ -212,7 +218,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
         cur.execute(
             f"SELECT {SCHEMA}.persist_idempotent_dual_series_bundle_fixture_v2("
             "%s::jsonb,false) AS profile_id",
-            (json.dumps(bundle),),
+            (json.dumps(bundle), test_mode),
         )
         profile_id = cur.fetchone()["profile_id"]
     conn.commit()
@@ -223,6 +229,7 @@ def persist_session(conn, payload: dict, now: datetime | None = None) -> dict:
         "identity": identity,
         "oi_context_available": bool((calculation.get("live_input_validation") or {}).get("oi_context_available")),
         "oi_units_verified": oi_verified,
+        "test_mode": test_mode,
         "timestamp_convention": TIMESTAMP_CONVENTION,
         "session_start_utc": session_bounds_utc(session_date)[0].isoformat(),
         "session_end_utc": session_bounds_utc(session_date)[1].isoformat(),
