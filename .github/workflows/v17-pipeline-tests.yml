@@ -10,6 +10,9 @@ on:
       - ".github/workflows/v17-pipeline-tests.yml"
       - "amt_engine/v17_writer.py"
       - "requirements.txt"
+  pull_request:
+    branches:
+      - feat/amt-v17-least-priv-writer-dev
   workflow_dispatch:
 
 permissions:
@@ -21,7 +24,7 @@ concurrency:
 
 jobs:
   offline-pipeline-tests:
-    if: github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline'
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/v17-historical-backfill-daily-pipeline' || github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
