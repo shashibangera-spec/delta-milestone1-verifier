@@ -31,6 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m pip install pytest==8.3.4
       - name: Compile AMT Engine package
         run: python -m compileall -q amt_engine
       - name: Run all offline unit tests
