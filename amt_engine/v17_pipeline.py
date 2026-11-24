@@ -138,20 +138,38 @@ def _verify(conn,d):
 def _execute(dates,apply,env):
     now=datetime.now(timezone.utc)
     with _source_conn(env) as src,_target_ro_conn(env) as dst:
-        plans=[]
+        # Preflight every requested date before the first write. Do not cache
+        # prior-profile payloads: each applied session must see earlier writes
+        # from this same chronological batch as valid reference candidates.
+        preflight=[]
         for d in dates:
             status=_existing(dst,d)
-            plans.append((d,status,None if status=="SKIP_COMPLETE" else _payload(src,dst,d,now)))
+            if status=="SKIP_COMPLETE":
+                preflight.append((d,status))
+            else:
+                _records(src,d,"PRICE","BTCUSD")
+                _records(src,d,"OI","OI:BTCUSD")
+                _,cutoff=session_bounds_utc(d)
+                if cutoff>now:
+                    raise PipelineError(f"{d}: session is not closed")
+                preflight.append((d,"PERSIST"))
         summary={"mode":"APPLY" if apply else "DRY_RUN","source_branch":SOURCE_BRANCH,
-          "target_branch":BRANCH_ID,"sessions":[{"date":d.isoformat(),"action":s} for d,s,_ in plans]}
+          "target_branch":BRANCH_ID,"sessions":[{"date":d.isoformat(),"action":s} for d,s in preflight]}
         if not apply: return summary
         validate_target_environment(env)
         results=[]
         with psycopg.connect(env["DATABASE_URL"],sslmode="require",row_factory=dict_row) as writer:
-            for d,status,payload in plans:
+            for d,status in preflight:
                 if status=="SKIP_COMPLETE":
                     results.append({"date":d.isoformat(),"status":"SKIPPED_COMPLETE"})
                     continue
+                # Re-check identity immediately before write; fail closed if a
+                # competing process has created or altered this session.
+                current=_existing(dst,d)
+                if current=="SKIP_COMPLETE":
+                    results.append({"date":d.isoformat(),"status":"SKIPPED_COMPLETE"})
+                    continue
+                payload=_payload(src,dst,d,now)
                 with writer.transaction():
                     result=persist_session(writer,payload,now=now,test_mode=False)
                 results.append({"date":d.isoformat(),**result,**_verify(dst,d)})
