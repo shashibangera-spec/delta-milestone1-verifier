@@ -14,5 +14,7 @@ COPY amt_engine ./amt_engine
 # The process runs non-root. Runtime input files should be mounted read-only.
 USER 10001:10001
 
+# Keep this as CMD (not ENTRYPOINT): Railway's service start command must be
+# able to replace the inert default for an explicitly scheduled pipeline run.
 # Inert by default: no DB connection, no input file read, no writes.
 CMD ["python", "-m", "amt_engine.v17_service", "idle"]
