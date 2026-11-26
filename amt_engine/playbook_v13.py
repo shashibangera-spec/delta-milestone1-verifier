@@ -32,18 +32,46 @@ def _num(value: Any) -> float | None:
 
 
 def classify_discovery(closes: Iterable[float], vah_upper: float, val_lower: float) -> str:
-    """Causal label from at most the latest two completed closes."""
+    """Replay causal Discovery from completed closes for the current session.
+
+    Discovery begins on the first strict close outside prior value. It ends
+    after two consecutive strict closes inside value or immediately when the
+    opposite value boundary is breached by a close. Boundary-equal closes are
+    neither outside nor inside and reset an inside streak without ending the
+    active Discovery state.
+    """
     values = [_num(x) for x in closes]
     values = [x for x in values if x is not None]
-    if not values:
+    if not values or vah_upper <= val_lower:
         return "UNKNOWN"
-    last = values[-1]
-    previous = values[-2] if len(values) > 1 else None
-    if last > vah_upper:
-        return "DISCOVERY_ABOVE" if previous is not None and previous > vah_upper else "DISCOVERY_CANDIDATE_ABOVE"
-    if last < val_lower:
-        return "DISCOVERY_BELOW" if previous is not None and previous < val_lower else "DISCOVERY_CANDIDATE_BELOW"
-    return "IN_VALUE"
+
+    state = "IN_VALUE"
+    inside_streak = 0
+    for close in values:
+        if state == "IN_VALUE":
+            if close > vah_upper:
+                state, inside_streak = "DISCOVERY_ABOVE", 0
+            elif close < val_lower:
+                state, inside_streak = "DISCOVERY_BELOW", 0
+        elif state == "DISCOVERY_ABOVE":
+            if close < val_lower:
+                state, inside_streak = "DISCOVERY_BELOW", 0
+            elif val_lower < close < vah_upper:
+                inside_streak += 1
+                if inside_streak >= 2:
+                    state, inside_streak = "IN_VALUE", 0
+            else:
+                inside_streak = 0
+        elif state == "DISCOVERY_BELOW":
+            if close > vah_upper:
+                state, inside_streak = "DISCOVERY_ABOVE", 0
+            elif val_lower < close < vah_upper:
+                inside_streak += 1
+                if inside_streak >= 2:
+                    state, inside_streak = "IN_VALUE", 0
+            else:
+                inside_streak = 0
+    return state
 
 
 def build_signal(previous: dict, current: dict, vah_upper: float, val_lower: float) -> Signal | None:
