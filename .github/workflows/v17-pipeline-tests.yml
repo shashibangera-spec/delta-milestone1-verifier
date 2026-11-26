@@ -8,6 +8,7 @@ on:
       - "amt_engine/v17_pipeline.py"
       - "tests/test_v17_pipeline.py"
       - ".github/workflows/v17-pipeline-tests.yml"
+      - ".github/workflows/v17-daily-pipeline.yml"
       - "amt_engine/v17_writer.py"
       - "requirements.txt"
   pull_request:
