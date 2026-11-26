@@ -131,6 +131,11 @@ def load_overview():
             cur.execute("""SELECT shadow_started_at,last_processed_candle_open,starting_realized_r
                            FROM amt_engine_v17.playbook_v13_shadow_state WHERE singleton=true""")
             shadow_state = cur.fetchone()
+            cur.execute("""SELECT COALESCE(sum(realized_r),0) AS realized_r,
+                                  count(*) AS total_trades,
+                                  count(*) FILTER (WHERE status='OPEN') AS open_trades
+                           FROM amt_engine_v17.playbook_v13_shadow_trades""")
+            shadow_totals = cur.fetchone()
 
     vah = profile.get("vah_upper") if profile else None
     val = profile.get("val_lower") if profile else None
@@ -158,7 +163,7 @@ def load_overview():
             "discovery": live_discovery,
             "oi": oi_context,
         },
-        "shadow": {"state": shadow_state, "trades": trades},
+        "shadow": {"state": shadow_state, "totals": shadow_totals, "trades": trades},
     })
 
 
@@ -255,7 +260,7 @@ async function refresh(){
  document.getElementById('developing-meta').textContent=v.progress?'Persisted progress '+v.progress+' · last candle close '+(v.last_candle_close?new Date(v.last_candle_close).toISOString():'—'):'No developing snapshots';
  const state=sh.state||{};document.getElementById('shadow-state').textContent=state.shadow_started_at?'Started '+new Date(state.shadow_started_at).toISOString().slice(0,16)+' · baseline '+fmt(state.starting_realized_r)+'R':'Shadow migration not applied';
  const trades=sh.trades||[];const open=trades.filter(t=>t.status==='OPEN').length;const total=trades.filter(t=>t.realized_r!==null).reduce((a,t)=>a+Number(t.realized_r),0);
- document.getElementById('shadow-r').textContent=total.toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+open+' open · '+trades.length+' recent';
+ const totals=sh.totals||{};document.getElementById('shadow-r').textContent=Number(totals.realized_r||0).toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+(totals.open_trades||0)+' open · '+(totals.total_trades||0)+' total trades';
  document.getElementById('trades').innerHTML=trades.length?trades.map(t=>'<tr><td>'+t.session_date+'</td><td>'+t.pattern+'</td><td>'+t.side+'</td><td>'+t.status+'</td><td>'+fmt(t.entry_price)+'</td><td>'+fmt(t.stop_price)+'</td><td>'+fmt(t.target_price)+'</td><td>'+t.discovery_state+'</td><td>'+t.oi_class+'</td><td>'+ (t.exit_reason||'—')+'</td><td>'+ (t.realized_r===null?'—':Number(t.realized_r).toFixed(2)+'R')+'</td></tr>').join(''):'<tr><td colspan="11">No shadow trades logged yet</td></tr>';
 }
 refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});setInterval(()=>refresh().catch(()=>{}),10000);
