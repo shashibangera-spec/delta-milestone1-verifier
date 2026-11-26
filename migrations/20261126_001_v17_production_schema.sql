@@ -1,14 +1,18 @@
 -- Migration: 20261126_001_v17_production_schema
--- Source baseline: amt-engine-v1-7-development (br-crimson-tooth-ao7oq469)
--- Target: production (br-snowy-water-aog0ilqw), database amt_research
--- Reproduces the approved V1.7 schema and routine definitions; does not import historical session rows.
+
+-- Source: validated development branch br-crimson-tooth-ao7oq469
+
+-- Target: production branch br-snowy-water-aog0ilqw, database amt_research
+
+-- Schema-only promotion. Does not import or modify historical session/candle rows.
+
 BEGIN;
+
 CREATE SCHEMA IF NOT EXISTS amt_engine_v17;
 
+CREATE TABLE amt_engine_v17.schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), source_commit text NOT NULL);
 
-CREATE SEQUENCE amt_engine_v17.developing_snapshots_snapshot_id_seq
-
-ALTER SEQUENCE amt_engine_v17.developing_snapshots_snapshot_id_seq OWNED BY amt_engine_v17.developing_snapshots.snapshot_id;
+CREATE SEQUENCE amt_engine_v17.developing_snapshots_snapshot_id_seq;
 
 CREATE TABLE amt_engine_v17.method_config (method_version text NOT NULL, session_timezone text NOT NULL, session_start_local time without time zone NOT NULL, session_length_bars integer NOT NULL, candle_resolution text NOT NULL, row_size numeric NOT NULL, value_area_fraction numeric NOT NULL, row_anchor text NOT NULL, source_timestamp_convention text NOT NULL DEFAULT 'UNKNOWN'::text, implementation_status text NOT NULL DEFAULT 'BLOCKED_PENDING_TIMESTAMP_EVIDENCE'::text, methodology_fingerprint text, created_at timestamp with time zone NOT NULL DEFAULT now(), notes text NOT NULL, CONSTRAINT method_config_candle_resolution_check CHECK ((candle_resolution = '30m'::text)), CONSTRAINT method_config_pkey PRIMARY KEY (method_version), CONSTRAINT method_config_row_anchor_check CHECK ((row_anchor = 'ZERO'::text)), CONSTRAINT method_config_row_size_check CHECK ((row_size = (50)::numeric)), CONSTRAINT method_config_session_length_bars_check CHECK ((session_length_bars = 48)), CONSTRAINT method_config_session_start_local_check CHECK ((session_start_local = '05:30:00'::time without time zone)), CONSTRAINT method_config_session_timezone_check CHECK ((session_timezone = 'Asia/Kolkata'::text)), CONSTRAINT method_config_source_timestamp_convention_check CHECK ((source_timestamp_convention = ANY (ARRAY['UNKNOWN'::text, 'OPEN'::text, 'CLOSE'::text]))), CONSTRAINT method_config_value_area_fraction_check CHECK ((value_area_fraction = 0.70)))
 
@@ -31,6 +35,8 @@ CREATE TABLE amt_engine_v17.source_candle_audit (source text NOT NULL, symbol te
 CREATE TABLE amt_engine_v17.session_write_fingerprints (session_date date NOT NULL, method_version text NOT NULL, symbol text NOT NULL, source text NOT NULL, profile_id uuid NOT NULL, fingerprint_version text NOT NULL, bundle_sha256 character(64) NOT NULL, created_at timestamp with time zone NOT NULL DEFAULT now(), persisted_sha256 character(64), CONSTRAINT session_write_fingerprints_bundle_sha256_check CHECK ((bundle_sha256 ~ '^[0-9a-f]{64}$'::text)), CONSTRAINT session_write_fingerprints_fingerprint_version_check CHECK ((fingerprint_version = 'AMT_ENGINE_V1.7_BUNDLE_SHA256_V1'::text)), CONSTRAINT session_write_fingerprints_persisted_sha256_check CHECK (((persisted_sha256 IS NULL) OR (persisted_sha256 ~ '^[0-9a-f]{64}$'::text))), CONSTRAINT session_write_fingerprints_pkey PRIMARY KEY (session_date, method_version, symbol, source), CONSTRAINT session_write_fingerprints_profile_id_fkey FOREIGN KEY (profile_id) REFERENCES amt_engine_v17.session_profiles(profile_id), CONSTRAINT session_write_fingerprints_profile_id_key UNIQUE (profile_id))
 
 CREATE TABLE amt_engine_v17.atr14_observations (symbol text NOT NULL, source text NOT NULL, candle_open timestamp with time zone NOT NULL, true_range numeric, atr14 numeric, pre_event_atr14 numeric, sequence_valid boolean NOT NULL, reset_reason text, seed_count integer NOT NULL DEFAULT 0, calculated_at timestamp with time zone NOT NULL DEFAULT now(), CONSTRAINT atr14_observations_pkey PRIMARY KEY (symbol, source, candle_open), CONSTRAINT atr14_observations_reset_reason_check CHECK ((reset_reason = ANY (ARRAY['MISSING_INTERVAL'::text, 'INVALID_OHLC'::text, 'DUPLICATE_INTERVAL'::text, 'UNRESOLVED_INTERVAL'::text]))))
+
+ALTER SEQUENCE amt_engine_v17.developing_snapshots_snapshot_id_seq OWNED BY amt_engine_v17.developing_snapshots.snapshot_id;
 
 CREATE INDEX atr14_observations_symbol_source_candle_open_idx ON amt_engine_v17.atr14_observations USING btree (symbol, source, candle_open)
 
@@ -2992,17 +2998,29 @@ $function$
 
 INSERT INTO amt_engine_v17.method_config (method_version,session_timezone,session_start_local,session_length_bars,candle_resolution,row_size,value_area_fraction,row_anchor,source_timestamp_convention,implementation_status,methodology_fingerprint,created_at,notes) VALUES ('AMT_ENGINE_V1.7','Asia/Kolkata','05:30:00',48,'30m',50,0.70,'ZERO','OPEN','HISTORICAL_MAPPING_IN_PROGRESS',NULL,'2026-11-23T12:41:36.219Z','Frozen Version 1.7 methodology. REST candle time is configured as UTC candle-open timestamp based on user-supplied live verification on api.india.delta.exchange for BTCUSD and OI:BTCUSD at 2026-11-23 14:38 UTC, plus historical chart/raw-payload comparisons. Live-fetch guard: request end must be <= current UTC time; exclude any candle where candle_open_time + 1800 seconds > current UTC time. Future-end zero-volume flat placeholder candles must be excluded. Historical receipt-time and fixed-boundary snapshot limitations remain; this approval does not certify historical real-time availability or production readiness. | OPEN timestamp convention verified by user-provided live Delta India REST test for BTCUSD and OI:BTCUSD; ingestion must cap end at current UTC and exclude bars whose open+1800s exceeds current UTC. | OI:BTCUSD unit verified from contemporaneous Delta India API evidence supplied 2026-11-24: ticker oi=654.0390 BTC and oi_value=654.0390 with oi_value_symbol=BTC; oi_contracts=654039 and contract_value=0.001 BTC/contract; oi_value_usd=40178923.8480 USD. Live OI:BTCUSD 30m OHLC close=652.701 is on BTC-value scale. Canonical OI candle unit is BTC (base currency), not contracts or USD. Contracts=OI_BTC/contract_value; USD notional=OI_BTC*price. Historical BTCUSD/delta_india v1.7 OI context units_verified reflects this series-level unit verification; no historical values were converted. | Exact live OPEN-boundary reconciliation supplied by user on 2026-11-24: Unix 1795465800 = 2026-11-23 20:30:00 UTC labels the 20:30-21:00 candle (OI open 657.577, close 653.633); Unix 1795467600 = 2026-11-23 21:00:00 UTC labels the 21:00-21:30 candle (OI open 653.633, close 652.701). Delta ticker snapshot at 2026-11-23T20:58:52.928Z (OI 654.0390 BTC; 654039 contracts; 0.001 BTC/contract) occurred in the final ~67 seconds of the 20:30-21:00 candle. Candle close 653.633 equals next candle open 653.633. OPEN timestamp convention and BTC base-unit interpretation are settled; series-level units_verified=true.') ON CONFLICT (method_version) DO NOTHING;
 
--- Least-privilege application grants; login roles are provisioned separately.
-REVOKE ALL ON ALL TABLES IN SCHEMA amt_engine_v17 FROM PUBLIC;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA amt_engine_v17 FROM PUBLIC;
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA amt_engine_v17 FROM PUBLIC;
-GRANT USAGE ON SCHEMA amt_engine_v17 TO amt_v17_writer_login, amt_dashboard_ro;
-GRANT SELECT ON amt_engine_v17.method_config, amt_engine_v17.session_profiles TO amt_v17_writer_login;
-GRANT USAGE, SELECT ON SEQUENCE amt_engine_v17.developing_snapshots_snapshot_id_seq TO amt_v17_writer_login;
-GRANT SELECT ON amt_engine_v17.developing_snapshots, amt_engine_v17.event_episodes, amt_engine_v17.event_wick_observations, amt_engine_v17.session_oi_context, amt_engine_v17.session_profiles, amt_engine_v17.session_write_fingerprints, amt_engine_v17.tpo_rows TO amt_dashboard_ro;
-GRANT USAGE ON SCHEMA research TO amt_dashboard_ro;
-GRANT SELECT ON research.delta_candles TO amt_dashboard_ro;
+REVOKE ALL ON SCHEMA amt_engine_v17 FROM PUBLIC;
 
+REVOKE ALL ON ALL TABLES IN SCHEMA amt_engine_v17 FROM PUBLIC;
+
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA amt_engine_v17 FROM PUBLIC;
+
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA amt_engine_v17 FROM PUBLIC;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA amt_engine_v17 REVOKE ALL ON TABLES FROM PUBLIC;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA amt_engine_v17 REVOKE ALL ON SEQUENCES FROM PUBLIC;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA amt_engine_v17 REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA amt_engine_v17 TO amt_v17_writer_login, amt_dashboard_ro;
+
+GRANT SELECT ON amt_engine_v17.method_config, amt_engine_v17.session_profiles TO amt_v17_writer_login;
+
+GRANT SELECT ON amt_engine_v17.developing_snapshots, amt_engine_v17.event_episodes, amt_engine_v17.event_wick_observations, amt_engine_v17.session_oi_context, amt_engine_v17.session_profiles, amt_engine_v17.session_write_fingerprints, amt_engine_v17.tpo_rows TO amt_dashboard_ro;
+
+GRANT USAGE ON SCHEMA research TO amt_dashboard_ro;
+
+GRANT SELECT ON research.delta_candles TO amt_dashboard_ro;
 
 GRANT EXECUTE ON FUNCTION amt_engine_v17.calculate_profile_fixture(jsonb,text) TO amt_v17_writer_login;
 GRANT EXECUTE ON FUNCTION amt_engine_v17.canonical_open_time(timestamp with time zone,text,text) TO amt_v17_writer_login;
@@ -3027,5 +3045,7 @@ GRANT EXECUTE ON FUNCTION amt_engine_v17.validate_price_required_oi_optional_fix
 GRANT EXECUTE ON FUNCTION amt_engine_v17.build_audited_dual_series_calculation_fixture_v2(date,jsonb,jsonb,jsonb,timestamp with time zone,boolean) TO amt_v17_writer_login;
 GRANT EXECUTE ON FUNCTION amt_engine_v17.adapt_dual_series_session_calculation_fixture_v5(jsonb,text,text,jsonb) TO amt_v17_writer_login;
 GRANT EXECUTE ON FUNCTION amt_engine_v17.persist_idempotent_dual_series_bundle_fixture_v2(jsonb,boolean) TO amt_v17_writer_login;
+
+INSERT INTO amt_engine_v17.schema_migrations(version,source_commit) VALUES ('20261126_001_v17_production_schema','424727d23cd19f13894ee4e407440f872de07031') ON CONFLICT (version) DO NOTHING;
 
 COMMIT;
