@@ -151,6 +151,9 @@ def run_shadow(now=None):
         oi_by_session = {}
         for observation in oi_rows:
             oi_by_session.setdefault(observation["candle_time"].date(), []).append(observation)
+        price_by_session = {}
+        for observation in price_rows:
+            price_by_session.setdefault(observation["candle_time"].date(), []).append(observation)
         processed = 0
         entries = 0
         exits = 0
@@ -228,7 +231,22 @@ def run_shadow(now=None):
                 oi_context = classify_oi(opening_oi, entry_oi)
                 discovery = "UNKNOWN"
                 profile = _prior_profile(target, session_date)
-                if profile:
+                # Discovery is replayed only when the current session's price
+                # history is contiguous from its 00:00 UTC / 05:30 IST reset.
+                session_open = datetime.combine(
+                    session_date, datetime.min.time(), tzinfo=timezone.utc
+                )
+                expected_opens = [
+                    session_open + CANDLE * n
+                    for n in range(int((candle_open - session_open) / CANDLE) + 1)
+                ]
+                actual_opens = [
+                    obs["candle_time"].astimezone(timezone.utc)
+                    for obs in price_by_session.get(session_date, [])
+                    if obs["candle_time"].astimezone(timezone.utc) <= candle_open
+                ]
+                session_history_contiguous = actual_opens == expected_opens
+                if profile and session_history_contiguous:
                     discovery = classify_discovery(
                         closes, float(profile["vah_upper"]), float(profile["val_lower"])
                     )
@@ -254,7 +272,7 @@ def run_shadow(now=None):
                             _record(writer, open_trade["trade_key"], "EXIT", candle_close, exit_payload)
                             exits += 1
                             exited_this_bar = True
-                    elif contiguous and profile:
+                    elif contiguous and profile and session_history_contiguous:
                         signal = build_signal(
                             {"close": float(previous["close_value"])}, current,
                             float(profile["vah_upper"]), float(profile["val_lower"]),
