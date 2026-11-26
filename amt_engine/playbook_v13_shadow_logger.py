@@ -92,7 +92,8 @@ def _prior_profile(conn, session_date):
                        FROM amt_engine_v17.session_profiles
                        WHERE source='delta_india' AND symbol='BTCUSD'
                          AND method_version=%s AND profile_status='COMPLETE'
-                         AND is_complete=true AND session_date < %s
+                         AND is_complete=true AND reference_status='AVAILABLE'
+                         AND session_date < %s
                        ORDER BY session_date DESC LIMIT 1""", (METHOD, session_date))
         return cur.fetchone()
 
