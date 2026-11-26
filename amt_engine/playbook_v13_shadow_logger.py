@@ -164,6 +164,9 @@ def run_shadow(now=None):
             identity = verify_database_identity(writer)
             if identity["branch_id"] != BRANCH_ID or identity["current_user"] != DATABASE_ROLE:
                 raise ShadowLoggerError("Production writer identity mismatch")
+            # End the identity-check transaction before the per-candle
+            # transactions, so each event/cursor update commits independently.
+            writer.commit()
 
             for row in price_rows:
                 candle_open = row["candle_time"].astimezone(timezone.utc)
