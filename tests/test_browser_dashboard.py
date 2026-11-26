@@ -1,11 +1,12 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 
 from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
-from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _validated_database_url, require_dashboard_auth
+from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _json, _validated_database_url, require_dashboard_auth
 
 
 def rows(*closes):
@@ -84,3 +85,15 @@ def test_dashboard_basic_auth_accepts_only_matching_credentials(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         require_dashboard_auth(HTTPBasicCredentials(username="observer", password="wrong"))
     assert exc.value.status_code == 401
+
+
+def test_dashboard_json_serializes_uuid_and_date_values():
+    from uuid import UUID
+    value = {
+        "profile_id": UUID("12345678-1234-5678-1234-567812345678"),
+        "session_date": date(2026, 11, 26),
+    }
+    assert _json(value) == {
+        "profile_id": "12345678-1234-5678-1234-567812345678",
+        "session_date": "2026-11-26",
+    }

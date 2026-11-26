@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import time
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from uuid import UUID
 from decimal import Decimal
 from urllib.parse import urlparse
 
@@ -47,6 +48,10 @@ def _json(value):
         return float(value)
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, dict):
         return {k: _json(v) for k, v in value.items()}
     if isinstance(value, list):
