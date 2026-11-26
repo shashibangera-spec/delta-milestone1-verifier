@@ -142,34 +142,3 @@ def evaluate_exit(trade: dict, candle: dict) -> dict | None:
     if target_hit:
         return {"exit_reason": "TARGET_2R", "exit_price": target, "realized_r": 2.0}
     return None
-
-
-def session_end_exit(trade: dict, candle: dict) -> dict:
-    """Close any still-open shadow position at the final completed session candle."""
-    close = _num(candle.get("close"))
-    if close is None:
-        raise ValueError("Session-end candle close is unavailable")
-    risk = float(trade["risk_points"])
-    if risk <= 0:
-        raise ValueError("Trade risk must be positive")
-    signed = close - float(trade["entry_price"])
-    if trade["side"] == "SHORT":
-        signed = -signed
-    return {"exit_reason": "SESSION_END", "exit_price": close, "realized_r": signed / risk}
-
-
-def classify_oi(opening_oi: Any, entry_oi: Any) -> dict:
-    opening, entry = _num(opening_oi), _num(entry_oi)
-    if opening is None or entry is None:
-        reason = "OPENING_OI_UNAVAILABLE" if opening is None else "ENTRY_OI_UNAVAILABLE"
-        return {"opening_oi": opening, "entry_oi": entry, "oi_delta": None,
-                "oi_class": "UNKNOWN", "oi_unknown_reason": reason}
-    delta = entry - opening
-    return {"opening_oi": opening, "entry_oi": entry, "oi_delta": delta,
-            "oi_class": "EXPANSION" if delta > 0 else "CONTRACTION_OR_FLAT",
-            "oi_unknown_reason": None}
-
-
-def deterministic_trade_key(signal: Signal, symbol: str, candle_close: str) -> str:
-    raw = "|".join(("BTC_PLAYBOOK_V1.3", symbol, signal.pattern, signal.side, candle_close))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
