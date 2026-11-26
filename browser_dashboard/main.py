@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import os
 import time
+import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import urlparse
 
 import psycopg
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg.rows import dict_row
 
@@ -19,7 +21,24 @@ EXPECTED_DATABASE = "amt_research"
 EXPECTED_ROLE = "amt_dashboard_ro"
 
 app = FastAPI(title="BTC V1.7 / Playbook V1.3 Observation Dashboard")
+security = HTTPBasic()
 _cache = {"at": 0.0, "data": None}
+
+
+def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(security)):
+    expected_user = os.environ.get("DASHBOARD_USERNAME", "")
+    expected_password = os.environ.get("DASHBOARD_PASSWORD", "")
+    if not expected_user or not expected_password:
+        raise HTTPException(status_code=503, detail="Dashboard authentication is not configured")
+    user_ok = secrets.compare_digest(credentials.username, expected_user)
+    password_ok = secrets.compare_digest(credentials.password, expected_password)
+    if not (user_ok and password_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid dashboard credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 
 def _json(value):
@@ -183,7 +202,7 @@ def load_overview():
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(_username: str = Depends(require_dashboard_auth)):
     return HTML
 
 
@@ -193,7 +212,7 @@ def health():
 
 
 @app.get("/api/overview")
-def overview():
+def overview(_username: str = Depends(require_dashboard_auth)):
     now = time.monotonic()
     if _cache["data"] is not None and now - _cache["at"] < 10:
         return JSONResponse(_cache["data"])
