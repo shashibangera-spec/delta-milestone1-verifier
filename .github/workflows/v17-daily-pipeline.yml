@@ -1,4 +1,4 @@
-name: V1.7 isolated daily pipeline
+name: V1.7 production daily pipeline
 
 on:
   schedule:
@@ -6,33 +6,32 @@ on:
   workflow_dispatch:
     inputs:
       session_date:
-        description: 'UTC session date to process (initial verification defaults to the already-complete 2026-11-23 session)'
+        description: 'Closed UTC session date to verify/process (YYYY-MM-DD); no default is intentionally provided'
         required: true
         type: string
-        default: '2026-11-23'
 
 permissions:
   contents: read
 
 concurrency:
-  group: v17-daily-pipeline
+  group: v17-production-daily-pipeline
   cancel-in-progress: false
 
 jobs:
-  daily-pipeline:
-    name: Run isolated V1.7 daily pipeline
+  production-daily-pipeline:
+    name: Run V1.7 production daily pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
-      # The writer credential is mapped to the exact variable expected by v17_pipeline.py.
-      DATABASE_URL: ${{ secrets.V17_DEV_DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.V17_PROD_DATABASE_URL }}
       V17_SOURCE_DATABASE_URL: ${{ secrets.V17_SOURCE_DATABASE_URL }}
-      V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_TARGET_READONLY_DATABASE_URL }}
+      V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
       NEON_PROJECT_ID: old-surf-34279165
-      NEON_BRANCH_ID: br-crimson-tooth-ao7oq469
+      NEON_BRANCH_ID: br-snowy-water-aog0ilqw
       NEON_DATABASE_NAME: amt_research
+      V17_WRITER_DATABASE_ROLE: amt_v17_writer_login
       V17_SOURCE_BRANCH_ID: br-lingering-grass-ao07mgrx
-      V17_TARGET_READ_BRANCH_ID: br-crimson-tooth-ao7oq469
+      V17_TARGET_READ_BRANCH_ID: br-snowy-water-aog0ilqw
       DISPATCH_SESSION_DATE: ${{ inputs.session_date }}
     steps:
       - name: Check out workflow branch
@@ -49,76 +48,132 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Validate required credentials are present
+      - name: Validate required production credentials
         shell: bash
         run: |
           set -euo pipefail
           for name in DATABASE_URL V17_SOURCE_DATABASE_URL V17_TARGET_READONLY_DATABASE_URL; do
             if [[ -z "${!name:-}" ]]; then
-              echo "::error::Required GitHub Actions secret for $name is missing."
+              echo "::error::Required GitHub Actions secret mapped to $name is missing."
               exit 1
             fi
           done
 
-      - name: Run daily pipeline in APPLY mode
+      - name: Verify production writer and read-only identities without writing
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          import psycopg
+
+          expected = {
+              "branch": "br-snowy-water-aog0ilqw",
+              "database": "amt_research",
+              "writer_role": "amt_v17_writer_login",
+              "reader_role": "amt_dashboard_ro",
+              "host": "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech",
+          }
+          assert os.environ["NEON_PROJECT_ID"] == "old-surf-34279165"
+          assert os.environ["NEON_BRANCH_ID"] == expected["branch"]
+          assert os.environ["V17_TARGET_READ_BRANCH_ID"] == expected["branch"]
+          for variable, role, read_only in (
+              ("DATABASE_URL", expected["writer_role"], False),
+              ("V17_TARGET_READONLY_DATABASE_URL", expected["reader_role"], True),
+          ):
+              url = os.environ[variable]
+              parsed = urlparse(url)
+              assert parsed.hostname == expected["host"], f"{variable}: wrong production branch host"
+              assert parsed.path.lstrip("/") == expected["database"], f"{variable}: wrong database"
+              with psycopg.connect(url, sslmode="require") as conn:
+                  with conn.cursor() as cur:
+                      if read_only:
+                          cur.execute("SET TRANSACTION READ ONLY")
+                          cur.execute("SHOW transaction_read_only")
+                          assert cur.fetchone()[0] in ("on", "true", "1")
+                      cur.execute("SELECT current_database(), current_user, session_user")
+                      db, user, session_user = cur.fetchone()
+                      assert (db, user, session_user) == (expected["database"], role, role), (variable, db, user, session_user)
+              print(f"IDENTITY PASS: {variable}; branch={expected['branch']}; database={db}; role={role}; read_only={read_only}")
+          PY
+
+      - name: Verify source branch identity is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$V17_SOURCE_BRANCH_ID" = "br-lingering-grass-ao07mgrx"
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          import psycopg
+          url = os.environ["V17_SOURCE_DATABASE_URL"]
+          parsed = urlparse(url)
+          assert parsed.hostname == "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech", "Source URL is not pinned to the live collector branch"
+          assert parsed.path.lstrip("/") == "amt_research"
+          with psycopg.connect(url, sslmode="require") as conn:
+              with conn.cursor() as cur:
+                  cur.execute("SET TRANSACTION READ ONLY")
+                  cur.execute("SELECT current_database(), current_user, session_user")
+                  db, user, session_user = cur.fetchone()
+                  assert (db, user, session_user) == ("amt_research", "amt_dashboard_ro", "amt_dashboard_ro")
+          print("SOURCE IDENTITY PASS: br-lingering-grass-ao07mgrx; amt_research; amt_dashboard_ro")
+          PY
+
+      - name: Validate dispatch date
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$DISPATCH_SESSION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::session_date must use YYYY-MM-DD."
+            exit 1
+          fi
+
+      - name: Run production daily pipeline in APPLY mode
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ ! "$DISPATCH_SESSION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-              echo "::error::session_date must use YYYY-MM-DD."
-              exit 1
-            fi
             python -m amt_engine.v17_pipeline daily --session-date "$DISPATCH_SESSION_DATE" --apply | tee "$RUNNER_TEMP/v17-daily-output.json"
           else
             python -m amt_engine.v17_pipeline daily --apply | tee "$RUNNER_TEMP/v17-daily-output.json"
           fi
 
-      - name: Verify target branch and expected session result
+      - name: Verify exact production routing and completed-session skip
         env:
           EVENT_NAME: ${{ github.event_name }}
           SESSION_DATE: ${{ inputs.session_date }}
           OUTPUT_FILE: ${{ runner.temp }}/v17-daily-output.json
         run: |
           python - <<'PY'
-          import json
-          import os
-          import sys
+          import json, os, sys
           from datetime import date, datetime, timedelta, timezone
 
           with open(os.environ["OUTPUT_FILE"], encoding="utf-8") as f:
               result = json.load(f)
-
           expected_source = "br-lingering-grass-ao07mgrx"
-          expected_target = "br-crimson-tooth-ao7oq469"
+          expected_target = "br-snowy-water-aog0ilqw"
           if result.get("mode") != "APPLY":
               sys.exit("Expected mode APPLY")
           if result.get("source_branch") != expected_source:
               sys.exit("Source branch identity mismatch")
           if result.get("target_branch") != expected_target:
-              sys.exit("Target branch identity mismatch")
+              sys.exit("Production target branch identity mismatch")
 
           if os.environ["EVENT_NAME"] == "workflow_dispatch":
-              session_date = date.fromisoformat(os.environ["SESSION_DATE"])
+              key = date.fromisoformat(os.environ["SESSION_DATE"]).isoformat()
           else:
-              session_date = datetime.now(timezone.utc).date() - timedelta(days=1)
+              key = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
 
-          key = session_date.isoformat()
-          sessions = result.get("sessions", [])
-          rows = [x for x in sessions if x.get("date") == key]
-          if len(rows) != 1:
-              sys.exit(f"Expected exactly one session summary for {key}; got {len(rows)}")
-
+          sessions = [x for x in result.get("sessions", []) if x.get("date") == key]
           outputs = [x for x in result.get("results", []) if x.get("date") == key]
-          if len(outputs) != 1:
-              sys.exit(f"Expected exactly one result for {key}; got {len(outputs)}")
+          if len(sessions) != 1 or len(outputs) != 1:
+              sys.exit(f"Expected exactly one session and result for {key}; got {len(sessions)} and {len(outputs)}")
 
           status = outputs[0].get("status")
-          if os.environ["EVENT_NAME"] == "workflow_dispatch" and key == "2026-11-23":
-              if status != "SKIPPED_COMPLETE":
-                  sys.exit(f"Expected 2026-11-23 to return SKIPPED_COMPLETE; got {status!r}")
-              if rows[0].get("action") != "SKIP_COMPLETE":
-                  sys.exit("Session summary did not report SKIP_COMPLETE")
+          if status == "SKIPPED_COMPLETE":
+              if sessions[0].get("action") != "SKIP_COMPLETE":
+                  sys.exit("SKIPPED_COMPLETE result lacks SKIP_COMPLETE preflight action")
           elif status == "PERSISTED":
               identity = outputs[0].get("identity", {})
               if identity.get("identity_verified") is not True:
@@ -127,12 +182,12 @@ jobs:
                   sys.exit("Writer connected to an unexpected Neon branch")
               if identity.get("current_user") != "amt_v17_writer_login":
                   sys.exit("Writer connected with an unexpected database role")
-              if outputs[0].get("snapshot_count") != 48:
-                  sys.exit("Post-write snapshot verification did not report 48 rows")
-              if outputs[0].get("oi_units_verified") is not True:
-                  sys.exit("Post-write OI unit verification failed")
-          elif status != "SKIPPED_COMPLETE":
-              sys.exit(f"Unexpected daily pipeline result status: {status!r}")
+              if outputs[0].get("snapshot_count") != 48 or outputs[0].get("oi_units_verified") is not True:
+                  sys.exit("Post-write snapshot/OI verification failed")
+          else:
+              sys.exit(f"Unexpected production result status: {status!r}")
 
-          print(f"Verified {key}: {status}; source={expected_source}; target={expected_target}")
+          if os.environ["EVENT_NAME"] == "workflow_dispatch" and key == "2026-11-25" and status != "SKIPPED_COMPLETE":
+              sys.exit(f"2026-11-25 must be SKIPPED_COMPLETE; got {status!r}")
+          print(f"PRODUCTION ROUTING PASS: {key}={status}; source={expected_source}; target={expected_target}")
           PY
