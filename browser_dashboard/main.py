@@ -148,9 +148,16 @@ def load_overview():
     vah = profile.get("vah_upper") if profile else None
     val = profile.get("val_lower") if profile else None
     live_discovery = _discovery(latest_price_rows, vah, val)
+    opening_row = next(
+        (row for row in oi_rows if row["candle_time"].astimezone(timezone.utc) == session_start),
+        None,
+    )
+    latest_oi_row = max(oi_rows, key=lambda row: row["retrieved_at"], default=None)
     oi_context = {
-        "opening_oi": float(oi_rows[0]["open_value"]) if oi_rows and oi_rows[0]["open_value"] is not None else None,
-        "entry_oi": float(oi_rows[-1]["close_value"]) if oi_rows and oi_rows[-1]["close_value"] is not None else None,
+        "opening_oi": float(opening_row["open_value"])
+            if opening_row and opening_row["open_value"] is not None else None,
+        "entry_oi": float(latest_oi_row["close_value"])
+            if latest_oi_row and latest_oi_row["close_value"] is not None else None,
     }
     if oi_context["opening_oi"] is None or oi_context["entry_oi"] is None:
         oi_context.update({"delta": None, "class": "UNKNOWN"})
