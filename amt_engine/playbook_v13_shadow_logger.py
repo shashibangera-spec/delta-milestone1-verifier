@@ -36,6 +36,7 @@ def _connect_ro(url: str, expected_host: str, label: str):
     conn = psycopg.connect(url, sslmode="require", row_factory=dict_row)
     try:
         with conn.cursor() as cur:
+            cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
             cur.execute("SET TRANSACTION READ ONLY")
             cur.execute("SELECT current_database(),current_user,session_user")
             db, user, session_user = cur.fetchone()
@@ -155,7 +156,6 @@ def run_shadow(now=None):
         exits = 0
         previous_by_session = {}
         closes_by_session = {}
-        opening_oi_by_session = {}
 
         with psycopg.connect(env["DATABASE_URL"], sslmode="require", row_factory=dict_row) as writer:
             identity = verify_database_identity(writer)
@@ -184,6 +184,7 @@ def run_shadow(now=None):
                     closes_by_session.setdefault(session_key, []).append(float(row["close_value"]))
                     with writer.transaction():
                         _advance_cursor(writer, candle_open)
+                    target.commit()
                     cursor = candle_open
                     processed += 1
                     continue
@@ -289,6 +290,9 @@ def run_shadow(now=None):
                             entries += 1
 
                     _advance_cursor(writer, candle_open)
+                # Refresh the read-only snapshot after every committed write so
+                # subsequent candles see the newly-opened/closed one-position state.
+                target.commit()
                 cursor = candle_open
                 processed += 1
                 previous_by_session[session_key] = row
