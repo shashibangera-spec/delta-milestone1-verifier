@@ -5,6 +5,8 @@ on:
     branches: [feat/amt-engine-daily-v1-corrected]
     paths:
       - "amt_engine/**"
+      - "browser_dashboard/**"
+      - "browser_dashboard/**"
       - "tests/test_amt_engine_daily.py"
       - "tests/test_amt_engine_daily_job.py"
       - ".github/workflows/amt-engine-tests.yml"
@@ -38,3 +40,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run dashboard pytest regressions (offline only)
         run: python -m pytest -q tests/test_browser_dashboard.py
+      - name: Build dashboard container image
+        run: docker build -f browser_dashboard/Dockerfile -t btc-dashboard-ci .
