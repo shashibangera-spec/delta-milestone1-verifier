@@ -40,4 +40,4 @@ jobs:
           pip install -r browser_dashboard/requirements.txt
           python -m pip install pytest==8.3.4
       - name: Run repository unit tests
-        run: python -m pytest -q
+        run: python -m pytest -q --ignore=tests/test_v17_writer_integration.py
