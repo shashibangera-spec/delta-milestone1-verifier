@@ -34,5 +34,5 @@ jobs:
           pip install -r requirements.txt
           pip install -r browser_dashboard/requirements.txt
           python -m pip install pytest==8.3.4
-      - name: Run all offline unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Run all offline unit and pytest tests
+        run: python -m pytest -q
