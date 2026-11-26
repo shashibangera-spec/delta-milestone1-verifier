@@ -64,6 +64,14 @@ def _iso(value):
     return value.astimezone(timezone.utc).isoformat() if value else None
 
 
+def _is_contiguous_30m(previous_candle, candle_open):
+    """Return True only when the immediately previous source bar is 30m earlier."""
+    if previous_candle is None:
+        return False
+    previous_open = previous_candle["candle_time"].astimezone(timezone.utc)
+    return candle_open - previous_open == CANDLE
+
+
 def _load_state(conn):
     with conn.cursor() as cur:
         cur.execute("""SELECT shadow_started_at,last_processed_candle_open,starting_realized_r
@@ -170,7 +178,8 @@ def run_shadow(now=None):
         processed = 0
         entries = 0
         exits = 0
-        previous_by_session = {}
+        # Price continuity is global across UTC midnight; Discovery stays session-local.
+        prev_candle = None
         closes_by_session = {}
 
         with psycopg.connect(env["DATABASE_URL"], sslmode="require", row_factory=dict_row) as writer:
@@ -186,20 +195,20 @@ def run_shadow(now=None):
                 candle_close = candle_open + CANDLE
                 session_date = candle_open.date()
                 session_key = session_date.isoformat()
-                previous = previous_by_session.get(session_key)
+                previous = prev_candle
 
                 # Keep the last source candle as causal context, even when it is not
                 # eligible for processing because it predates the shadow start/cursor.
                 should_process = candle_close > start and (cursor is None or candle_open > cursor)
                 if not should_process:
-                    previous_by_session[session_key] = row
+                    prev_candle = row
                     closes_by_session.setdefault(session_key, []).append(float(row["close_value"]))
                     continue
 
                 if previous is None:
                     # Recover the immediately preceding same-session candle if the query
                     # began at the first eligible bar; otherwise do not invent a setup.
-                    previous_by_session[session_key] = row
+                    prev_candle = row
                     closes_by_session.setdefault(session_key, []).append(float(row["close_value"]))
                     with writer.transaction():
                         _advance_cursor(writer, candle_open)
@@ -209,7 +218,7 @@ def run_shadow(now=None):
                     continue
 
                 previous_open = previous["candle_time"].astimezone(timezone.utc)
-                contiguous = candle_open - previous_open == CANDLE
+                contiguous = _is_contiguous_30m(previous, candle_open)
                 current = {
                     "open": float(row["open_value"]), "high": float(row["high_value"]),
                     "low": float(row["low_value"]), "close": float(row["close_value"]),
@@ -329,7 +338,7 @@ def run_shadow(now=None):
                 target.commit()
                 cursor = candle_open
                 processed += 1
-                previous_by_session[session_key] = row
+                prev_candle = row
 
         return {
             "status": "OK", "mode": "SHADOW_ONLY", "strategy_version": "BTC_PLAYBOOK_V1.3",

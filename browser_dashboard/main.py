@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg.rows import dict_row
 
 from amt_engine.playbook_v13 import classify_discovery
+from browser_dashboard.auction_context import build_prior_auction_context
 
 EXPECTED_HOST = "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech"
 EXPECTED_SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech"
@@ -109,6 +110,7 @@ def _discovery(closes, vah, val):
 def load_overview():
     now = datetime.now(timezone.utc)
     session_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    auction_query_start = session_start - timedelta(days=3)
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""SELECT p.profile_id,p.reference_profile_id,p.session_date,p.method_version,p.profile_status,
@@ -127,6 +129,7 @@ def load_overview():
 
             developing = None
             prior_profile = None
+            completed_profiles = []
             if profile:
                 cur.execute("""SELECT count(*) AS snapshots,
                                       (array_agg(developing_poc_lower ORDER BY candle_open DESC))[1] AS dpoc_lower,
@@ -149,6 +152,15 @@ def load_overview():
                                 (reference_id,))
                     prior_profile = cur.fetchone()
 
+            cur.execute("""SELECT session_date,poc_lower,vah_upper,val_lower
+                           FROM amt_engine_v17.session_profiles
+                           WHERE source='delta_india' AND symbol='BTCUSD'
+                             AND method_version='AMT_ENGINE_V1.7'
+                             AND profile_status='COMPLETE' AND is_complete=true
+                             AND reference_status='AVAILABLE'
+                           ORDER BY session_date DESC LIMIT 2""")
+            completed_profiles = list(reversed(cur.fetchall()))
+
             # Live candles are read from the collector branch; production AMT profiles
             # and the shadow ledger remain on the production branch above/below.
             with _connect("SOURCE_DATABASE_URL", EXPECTED_SOURCE_HOST) as source_conn:
@@ -159,7 +171,7 @@ def load_overview():
                                             AND resolution='30m'
                                             AND candle_time >= %s
                                             AND candle_time + interval '30 minutes' <= %s
-                                          ORDER BY candle_time""", (session_start, now))
+                                          ORDER BY candle_time""", (auction_query_start, now))
                     latest_price_rows = source_cur.fetchall()
 
                     source_cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
@@ -190,6 +202,26 @@ def load_overview():
     vah = prior_profile.get("vah_upper") if prior_profile else None
     val = prior_profile.get("val_lower") if prior_profile else None
     live_discovery = _discovery(latest_price_rows, vah, val)
+    candle_days = {}
+    for candle in latest_price_rows:
+        candle_day = candle["candle_time"].astimezone(timezone.utc).date()
+        candle_days.setdefault(candle_day, []).append(candle)
+    completed_candles = []
+    for item in completed_profiles:
+        day = item["session_date"]
+        day_rows = candle_days.get(day, [])
+        completed_candles.append({
+            "session_date": day,
+            "range": {
+                "high": max((float(x["high_value"]) for x in day_rows), default=None),
+                "low": min((float(x["low_value"]) for x in day_rows), default=None),
+                "close": float(day_rows[-1]["close_value"]) if day_rows else None,
+            } if day_rows else None,
+        })
+    auction_context = build_prior_auction_context(
+        completed_profiles, completed_candles,
+        candle_days.get(session_start.date(), []),
+    )
     opening_row = next(
         (row for row in oi_rows if row["candle_time"].astimezone(timezone.utc) == session_start),
         None,
@@ -215,6 +247,7 @@ def load_overview():
             **(developing or {}),
             "progress": f"{int(developing['snapshots']) if developing else 0}/48",
         } if profile else None,
+        "auction_context": auction_context,
         "live": {
             "price": latest_price_rows[-1] if latest_price_rows else None,
             "discovery": live_discovery,
@@ -294,6 +327,20 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}
  </div>
  <div class="sub" id="developing-meta">—</div>
 </section>
+<section class="panel section"><h2>Prior Completed Auction · 00:00–00:00 UTC / 05:30–05:30 IST</h2>
+ <div class="levels">
+  <div class="level"><small>Close Location</small><b id="auction-close">—</b></div>
+  <div class="level"><small>Value Migration</small><b id="auction-migration">—</b></div>
+  <div class="level"><small>Swing Structure</small><b id="auction-swing">—</b></div>
+ </div><div class="sub" id="auction-date">Descriptive context only · compares the latest two completed auctions</div>
+</section>
+<section class="panel section"><h2>Sub-Session Development · UTC</h2>
+ <div class="levels" id="subsessions">
+  <div class="level"><small>Asia · 00:00–08:00</small><b>—</b><div class="sub">Range / extension</div></div>
+  <div class="level"><small>Europe · 08:00–13:30</small><b>—</b><div class="sub">Range / extension</div></div>
+  <div class="level"><small>US · 13:30–00:00</small><b>—</b><div class="sub">Range / extension</div></div>
+ </div><div class="sub">Range development only; no directional prediction</div>
+</section>
 <section class="panel section"><h2>Playbook V1.3 — active and recent shadow trades</h2>
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 </section>
@@ -316,6 +363,16 @@ async function refresh(){
  document.getElementById('dvah').textContent=fmt(v.dvah);document.getElementById('dpoc').textContent=fmt(v.dpoc_lower)+'–'+fmt(v.dpoc_upper);document.getElementById('dval').textContent=fmt(v.dval);
  document.getElementById('developing-meta').textContent=v.progress?'Persisted progress '+v.progress+' · last candle close '+(v.last_candle_close?new Date(v.last_candle_close).toISOString():'—'):'No developing snapshots';
  const state=sh.state||{};document.getElementById('shadow-state').textContent=state.shadow_started_at?'Started '+new Date(state.shadow_started_at).toISOString().slice(0,16)+' · baseline '+fmt(state.starting_realized_r)+'R':'Shadow migration not applied';
+ const auction=d.auction_context||{};
+ document.getElementById('auction-close').textContent=auction.close_location||'Unavailable';
+ document.getElementById('auction-migration').textContent=auction.value_migration||'Unavailable';
+ document.getElementById('auction-swing').textContent=auction.swing_structure||'Unavailable';
+ document.getElementById('auction-date').textContent=auction.session_date?'Completed auction '+auction.session_date+' UTC · descriptive, non-predictive':'Completed auction context unavailable';
+ document.getElementById('subsessions').innerHTML=(auction.subsessions||[]).map((s,i)=>{
+  const range=s.range?fmt(s.range.low)+' – '+fmt(s.range.high):'Not started';
+  const label=['Asia · 00:00–08:00','Europe · 08:00–13:30','US · 13:30–00:00'][i];
+  return '<div class="level"><small>'+label+' UTC</small><b>'+range+'</b><div class="sub">'+(s.development||'Unavailable')+'</div></div>';
+ }).join('');
  const trades=sh.trades||[];const open=trades.filter(t=>t.status==='OPEN').length;const total=trades.filter(t=>t.realized_r!==null).reduce((a,t)=>a+Number(t.realized_r),0);
  const totals=sh.totals||{};document.getElementById('shadow-r').textContent=Number(totals.realized_r||0).toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+(totals.open_trades||0)+' open · '+(totals.total_trades||0)+' total trades';
  document.getElementById('trades').innerHTML=trades.length?trades.map(t=>'<tr><td>'+t.session_date+'</td><td>'+t.pattern+'</td><td>'+t.side+'</td><td>'+t.status+'</td><td>'+fmt(t.entry_price)+'</td><td>'+fmt(t.stop_price)+'</td><td>'+fmt(t.target_price)+'</td><td>'+t.discovery_state+'</td><td>'+t.oi_class+'</td><td>'+ (t.exit_reason||'—')+'</td><td>'+ (t.realized_r===null?'—':Number(t.realized_r).toFixed(2)+'R')+'</td></tr>').join(''):'<tr><td colspan="11">No shadow trades logged yet</td></tr>';

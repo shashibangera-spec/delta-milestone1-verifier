@@ -1,10 +1,14 @@
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timezone
+
+from amt_engine.playbook_v13 import evaluate_exit
 
 from amt_engine.playbook_v13_shadow_logger import (
     SOURCE_HOST,
     ShadowLoggerError,
     _connect_ro,
+    _is_contiguous_30m,
 )
 
 
@@ -89,6 +93,29 @@ class SourceIdentityTests(unittest.TestCase):
                 _connect_ro(url, SOURCE_HOST, "Live collector source")
 
         self.assertTrue(connection.closed)
+
+
+class MidnightContinuityTests(unittest.TestCase):
+    def _bar(self, timestamp):
+        return {"candle_time": timestamp}
+
+    def test_2330_to_0000_utc_is_contiguous(self):
+        previous = self._bar(datetime(2026, 11, 26, 23, 30, tzinfo=timezone.utc))
+        current = datetime(2026, 11, 27, 0, 0, tzinfo=timezone.utc)
+        self.assertTrue(_is_contiguous_30m(previous, current))
+
+    def test_open_trade_can_be_evaluated_on_midnight_candle(self):
+        previous = self._bar(datetime(2026, 11, 26, 23, 30, tzinfo=timezone.utc))
+        current_open = datetime(2026, 11, 27, 0, 0, tzinfo=timezone.utc)
+        trade = {"side": "LONG", "stop_price": 99.0, "target_price": 103.0}
+        candle = {"high": 101.0, "low": 98.0, "close": 99.5}
+        self.assertTrue(_is_contiguous_30m(previous, current_open))
+        self.assertEqual(evaluate_exit(trade, candle)["exit_reason"], "STOP")
+
+    def test_genuine_30m_gap_is_not_contiguous(self):
+        previous = self._bar(datetime(2026, 11, 26, 23, 0, tzinfo=timezone.utc))
+        current = datetime(2026, 11, 27, 0, 0, tzinfo=timezone.utc)
+        self.assertFalse(_is_contiguous_30m(previous, current))
 
 
 if __name__ == "__main__":
