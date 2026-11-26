@@ -1,0 +1,57 @@
+name: Playbook v1.3 production shadow logger
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playbook-v13-production-shadow
+  cancel-in-progress: false
+
+jobs:
+  shadow-log:
+    name: Process completed 30m candles into the v1.3 shadow ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.V17_PROD_DATABASE_URL }}
+      V17_SOURCE_DATABASE_URL: ${{ secrets.V17_SOURCE_DATABASE_URL }}
+      V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+      NEON_PROJECT_ID: old-surf-34279165
+      NEON_BRANCH_ID: br-snowy-water-aog0ilqw
+      NEON_DATABASE_NAME: amt_research
+      V17_WRITER_DATABASE_ROLE: amt_v17_writer_login
+      V17_SOURCE_BRANCH_ID: br-lingering-grass-ao07mgrx
+      V17_TARGET_READ_BRANCH_ID: br-snowy-water-aog0ilqw
+    steps:
+      - name: Check out workflow branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate required credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in DATABASE_URL V17_SOURCE_DATABASE_URL V17_TARGET_READONLY_DATABASE_URL; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required GitHub Actions secret mapped to $name is missing."
+              exit 1
+            fi
+          done
+
+      - name: Run v1.3 shadow logger (no orders)
+        run: python -m amt_engine.playbook_v13_shadow_logger
