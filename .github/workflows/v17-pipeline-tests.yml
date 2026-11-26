@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/v17-historical-backfill-daily-pipeline
+      - feat/gate-d-e-playbook-v13-dashboard
     paths:
       - "amt_engine/v17_pipeline.py"
       - "tests/test_v17_pipeline.py"
@@ -30,7 +31,7 @@ concurrency:
 
 jobs:
   offline-pipeline-tests:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/v17-historical-backfill-daily-pipeline' || github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/v17-historical-backfill-daily-pipeline' || github.head_ref == 'feat/gate-d-e-playbook-v13-dashboard') || github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline' || github.ref == 'refs/heads/feat/gate-d-e-playbook-v13-dashboard'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
