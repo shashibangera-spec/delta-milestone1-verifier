@@ -120,6 +120,10 @@ BEGIN
             p_payload->>'discovery_state',(p_payload->>'opening_oi')::numeric,
             (p_payload->>'entry_oi')::numeric,(p_payload->>'oi_delta')::numeric,
             p_payload->>'oi_class',p_payload->>'oi_unknown_reason',
+            (p_payload->>'opening_oi_observation_time')::timestamptz,
+            (p_payload->>'opening_oi_retrieved_at')::timestamptz,
+            (p_payload->>'oi_observation_time')::timestamptz,
+            COALESCE(p_payload->>'oi_units','BTC'),
             (p_payload->>'price_retrieved_at')::timestamptz,
             (p_payload->>'oi_retrieved_at')::timestamptz,
             (p_payload->>'entry_cutoff_at')::timestamptz
