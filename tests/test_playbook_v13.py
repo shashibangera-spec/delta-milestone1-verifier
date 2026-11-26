@@ -63,12 +63,25 @@ def test_strict_inside_close_does_not_count_as_reclaim_at_boundary():
     assert signal is None
 
 
-def test_discovery_is_causal_and_requires_two_consecutive_completed_closes():
-    assert classify_discovery([101], 100, 90) == "DISCOVERY_CANDIDATE_ABOVE"
-    assert classify_discovery([101, 102], 100, 90) == "DISCOVERY_ABOVE"
-    assert classify_discovery([89], 100, 90) == "DISCOVERY_CANDIDATE_BELOW"
-    assert classify_discovery([89, 88], 100, 90) == "DISCOVERY_BELOW"
-    assert classify_discovery([89, 95], 100, 90) == "IN_VALUE"
+def test_discovery_starts_on_first_completed_close_outside_value():
+    assert classify_discovery([101], 100, 90) == "DISCOVERY_ABOVE"
+    assert classify_discovery([89], 100, 90) == "DISCOVERY_BELOW"
+
+
+def test_discovery_terminates_after_two_consecutive_strict_inside_closes():
+    assert classify_discovery([101, 95], 100, 90) == "DISCOVERY_ABOVE"
+    assert classify_discovery([101, 95, 96], 100, 90) == "IN_VALUE"
+    assert classify_discovery([89, 95, 94], 100, 90) == "IN_VALUE"
+
+
+def test_discovery_switches_immediately_on_opposite_boundary_close():
+    assert classify_discovery([101, 89], 100, 90) == "DISCOVERY_BELOW"
+    assert classify_discovery([89, 101], 100, 90) == "DISCOVERY_ABOVE"
+
+
+def test_boundary_equal_close_does_not_count_as_strict_inside():
+    assert classify_discovery([101, 95, 100, 96], 100, 90) == "DISCOVERY_ABOVE"
+    assert classify_discovery([89, 95, 90, 94], 100, 90) == "DISCOVERY_BELOW"
 
 
 def test_stop_wins_when_stop_and_target_are_both_touched():
