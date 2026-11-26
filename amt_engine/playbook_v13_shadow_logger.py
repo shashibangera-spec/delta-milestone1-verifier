@@ -42,9 +42,17 @@ def _connect_ro(url: str, expected_host: str, label: str):
         with conn.cursor() as cur:
             cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
             cur.execute("SET TRANSACTION READ ONLY")
-            cur.execute("SELECT current_database(),current_user,session_user")
-            db, user, session_user = cur.fetchone()
-        if (db, user, session_user) != (DATABASE_NAME, "amt_dashboard_ro", "amt_dashboard_ro"):
+            cur.execute(
+                "SELECT current_database() AS database_name, "
+                "current_user AS current_user, session_user AS session_user"
+            )
+            identity = cur.fetchone()
+        if (
+            not identity
+            or identity["database_name"] != DATABASE_NAME
+            or identity["current_user"] != "amt_dashboard_ro"
+            or identity["session_user"] != "amt_dashboard_ro"
+        ):
             raise ShadowLoggerError(f"{label} read-only database identity mismatch")
         return conn
     except Exception:
