@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS amt_engine_v17.playbook_v13_shadow_trades (
     oi_delta numeric NULL,
     oi_class text NOT NULL CHECK (oi_class IN ('EXPANSION','CONTRACTION_OR_FLAT','UNKNOWN')),
     oi_unknown_reason text NULL,
+    opening_oi_observation_time timestamptz NULL,
+    opening_oi_retrieved_at timestamptz NULL,
+    oi_observation_time timestamptz NULL,
+    oi_units text NOT NULL DEFAULT 'BTC' CHECK (oi_units = 'BTC'),
     price_retrieved_at timestamptz NULL,
     oi_retrieved_at timestamptz NULL,
     entry_cutoff_at timestamptz NOT NULL,
@@ -53,6 +57,12 @@ CREATE TABLE IF NOT EXISTS amt_engine_v17.playbook_v13_shadow_trades (
     CHECK (target_price > entry_price OR side = 'SHORT'),
     CHECK (target_price < entry_price OR side = 'LONG')
 );
+
+ALTER TABLE amt_engine_v17.playbook_v13_shadow_trades
+    ADD COLUMN IF NOT EXISTS opening_oi_observation_time timestamptz NULL,
+    ADD COLUMN IF NOT EXISTS opening_oi_retrieved_at timestamptz NULL,
+    ADD COLUMN IF NOT EXISTS oi_observation_time timestamptz NULL,
+    ADD COLUMN IF NOT EXISTS oi_units text NOT NULL DEFAULT 'BTC' CHECK (oi_units = 'BTC');
 
 CREATE INDEX IF NOT EXISTS playbook_v13_shadow_trades_status_time_idx
 ON amt_engine_v17.playbook_v13_shadow_trades(status, signal_candle_close DESC);
@@ -95,6 +105,7 @@ BEGIN
             signal_candle_open,signal_candle_close,entry_time_utc,entry_price,stop_price,target_price,
             risk_points,buffer_points,prior_profile_id,prior_vah_upper,prior_val_lower,
             discovery_state,opening_oi,entry_oi,oi_delta,oi_class,oi_unknown_reason,
+            opening_oi_observation_time,opening_oi_retrieved_at,oi_observation_time,oi_units,
             price_retrieved_at,oi_retrieved_at,entry_cutoff_at
         ) VALUES (
             p_trade_key,(p_payload->>'session_date')::date,p_payload->>'symbol',
