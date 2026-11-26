@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS amt_engine_v17.playbook_v13_shadow_trades (
     status text NOT NULL CHECK (status IN ('OPEN','CLOSED')),
     signal_candle_open timestamptz NOT NULL,
     signal_candle_close timestamptz NOT NULL,
+    entry_time_utc timestamptz NOT NULL,
     entry_price numeric NOT NULL,
     stop_price numeric NOT NULL,
     target_price numeric NOT NULL,
@@ -91,7 +92,7 @@ BEGIN
     IF p_event_type = 'ENTRY' THEN
         INSERT INTO amt_engine_v17.playbook_v13_shadow_trades(
             trade_key,session_date,symbol,pattern,side,status,
-            signal_candle_open,signal_candle_close,entry_price,stop_price,target_price,
+            signal_candle_open,signal_candle_close,entry_time_utc,entry_price,stop_price,target_price,
             risk_points,buffer_points,prior_profile_id,prior_vah_upper,prior_val_lower,
             discovery_state,opening_oi,entry_oi,oi_delta,oi_class,oi_unknown_reason,
             price_retrieved_at,oi_retrieved_at,entry_cutoff_at
@@ -100,6 +101,7 @@ BEGIN
             p_payload->>'pattern',p_payload->>'side','OPEN',
             (p_payload->>'signal_candle_open')::timestamptz,
             (p_payload->>'signal_candle_close')::timestamptz,
+            (p_payload->>'entry_time_utc')::timestamptz,
             (p_payload->>'entry_price')::numeric,(p_payload->>'stop_price')::numeric,
             (p_payload->>'target_price')::numeric,(p_payload->>'risk_points')::numeric,
             (p_payload->>'buffer_points')::numeric,(p_payload->>'prior_profile_id')::uuid,
