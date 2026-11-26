@@ -150,7 +150,10 @@ def test_subsession_ranges_and_extensions_are_descriptive():
 
 
 def test_dashboard_discovery_rows_are_scoped_to_current_utc_day():
-    previous_day = rows(60500, 60600)
+    previous_day = [
+        {"candle_time": datetime(2026, 11, 25, 23, 0, tzinfo=timezone.utc), "close_value": 60500},
+        {"candle_time": datetime(2026, 11, 25, 23, 30, tzinfo=timezone.utc), "close_value": 60600},
+    ]
     current_day = [
         {"candle_time": datetime(2026, 11, 26, 0, 0, tzinfo=timezone.utc), "close_value": 59500},
         {"candle_time": datetime(2026, 11, 26, 0, 30, tzinfo=timezone.utc), "close_value": 59600},
