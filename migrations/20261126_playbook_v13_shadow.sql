@@ -76,18 +76,15 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, amt_engine_v17
 AS $$
-DECLARE
-    inserted_count integer;
 BEGIN
     IF p_event_type NOT IN ('ENTRY','EXIT') OR p_event_at IS NULL OR p_payload IS NULL THEN
         RAISE EXCEPTION 'INVALID_SHADOW_EVENT';
     END IF;
 
-    INSERT INTO amt_engine_v17.playbook_v13_shadow_events(trade_key,event_type,event_at,payload)
-    VALUES (p_trade_key,p_event_type,p_event_at,p_payload)
-    ON CONFLICT (trade_key,event_type,event_at) DO NOTHING;
-    GET DIAGNOSTICS inserted_count = ROW_COUNT;
-    IF inserted_count = 0 THEN
+    IF EXISTS (
+        SELECT 1 FROM amt_engine_v17.playbook_v13_shadow_events
+        WHERE trade_key=p_trade_key AND event_type=p_event_type AND event_at=p_event_at
+    ) THEN
         RETURN;
     END IF;
 
@@ -113,7 +110,7 @@ BEGIN
             (p_payload->>'price_retrieved_at')::timestamptz,
             (p_payload->>'oi_retrieved_at')::timestamptz,
             (p_payload->>'entry_cutoff_at')::timestamptz
-        );
+        ) ON CONFLICT (trade_key) DO NOTHING;
     ELSE
         UPDATE amt_engine_v17.playbook_v13_shadow_trades
         SET status='CLOSED',
@@ -125,9 +122,19 @@ BEGIN
             updated_at=now()
         WHERE trade_key=p_trade_key AND status='OPEN';
         IF NOT FOUND THEN
+            IF EXISTS (
+                SELECT 1 FROM amt_engine_v17.playbook_v13_shadow_events
+                WHERE trade_key=p_trade_key AND event_type=p_event_type AND event_at=p_event_at
+            ) THEN
+                RETURN;
+            END IF;
             RAISE EXCEPTION 'SHADOW_EXIT_WITHOUT_OPEN_TRADE';
         END IF;
     END IF;
+
+    INSERT INTO amt_engine_v17.playbook_v13_shadow_events(trade_key,event_type,event_at,payload)
+    VALUES (p_trade_key,p_event_type,p_event_at,p_payload)
+    ON CONFLICT (trade_key,event_type,event_at) DO NOTHING;
 END;
 $$;
 
@@ -137,14 +144,14 @@ CREATE OR REPLACE FUNCTION amt_engine_v17.advance_playbook_v13_shadow_cursor(
 LANGUAGE sql
 SECURITY DEFINER
 SET search_path = pg_catalog, amt_engine_v17
-AS $$
+AS $
     UPDATE amt_engine_v17.playbook_v13_shadow_state
     SET last_processed_candle_open = GREATEST(
             COALESCE(last_processed_candle_open, p_candle_open), p_candle_open
         ),
         updated_at = now()
-    WHERE singleton = true
-$$;
+    WHERE singleton = true AND p_candle_open IS NOT NULL
+$;
 
 REVOKE ALL ON amt_engine_v17.playbook_v13_shadow_state,
     amt_engine_v17.playbook_v13_shadow_trades,
