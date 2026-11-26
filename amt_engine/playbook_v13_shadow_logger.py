@@ -31,7 +31,11 @@ class ShadowLoggerError(RuntimeError):
 
 def _connect_ro(url: str, expected_host: str, label: str):
     parsed = urlparse(url or "")
-    if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname != expected_host:
+    accepted_hosts = {
+        expected_host,
+        expected_host.replace(".c-", "-pooler.c-"),
+    }
+    if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in accepted_hosts:
         raise ShadowLoggerError(f"{label} URL is not pinned to its approved Neon branch")
     conn = psycopg.connect(url, sslmode="require", row_factory=dict_row)
     try:
@@ -135,7 +139,7 @@ def run_shadow(now=None):
         raise ShadowLoggerError("No unique pinned host exists for the configured target branch")
 
     validate_target_environment(env)
-    with _connect_ro(env.get("V17_SOURCE_DATABASE_URL"), SOURCE_HOST, "Live collector source") as source, \
+    with _connect_ro(env.get("V17_SOURCE_READONLY_DATABASE_URL"), SOURCE_HOST, "Live collector source") as source, \
          _connect_ro(env.get("V17_TARGET_READONLY_DATABASE_URL"), TARGET_HOST, "Production target") as target:
         state = _load_state(target)
         start = state["shadow_started_at"].astimezone(timezone.utc)
