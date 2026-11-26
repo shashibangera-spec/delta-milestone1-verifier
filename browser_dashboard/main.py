@@ -92,6 +92,11 @@ def _connect(env_name="DATABASE_URL", expected_host=EXPECTED_HOST):
         raise
 
 
+def _session_rows(rows, session_date):
+    """Keep Discovery history isolated to one UTC auction day."""
+    return [row for row in rows if row["candle_time"].astimezone(timezone.utc).date() == session_date]
+
+
 def _discovery(closes, vah, val):
     if not closes or vah is None or val is None:
         return "UNKNOWN"
@@ -201,7 +206,8 @@ def load_overview():
 
     vah = prior_profile.get("vah_upper") if prior_profile else None
     val = prior_profile.get("val_lower") if prior_profile else None
-    live_discovery = _discovery(latest_price_rows, vah, val)
+    current_session_rows = _session_rows(latest_price_rows, session_start.date())
+    live_discovery = _discovery(current_session_rows, vah, val)
     candle_days = {}
     for candle in latest_price_rows:
         candle_day = candle["candle_time"].astimezone(timezone.utc).date()
