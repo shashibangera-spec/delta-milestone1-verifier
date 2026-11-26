@@ -2,7 +2,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from browser_dashboard.main import _connect, _discovery
+from fastapi import HTTPException
+from fastapi.security import HTTPBasicCredentials
+
+from browser_dashboard.main import _connect, _discovery, require_dashboard_auth
 
 
 def rows(*closes):
@@ -40,3 +43,22 @@ def test_dashboard_refuses_non_production_host_before_connecting(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="production amt_dashboard_ro"):
         _connect()
+
+
+def test_dashboard_requires_configured_basic_auth(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    with pytest.raises(HTTPException) as exc:
+        require_dashboard_auth(HTTPBasicCredentials(username="user", password="pass"))
+    assert exc.value.status_code == 503
+
+
+def test_dashboard_basic_auth_accepts_only_matching_credentials(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_USERNAME", "observer")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "correct-horse-battery")
+    assert require_dashboard_auth(
+        HTTPBasicCredentials(username="observer", password="correct-horse-battery")
+    ) == "observer"
+    with pytest.raises(HTTPException) as exc:
+        require_dashboard_auth(HTTPBasicCredentials(username="observer", password="wrong"))
+    assert exc.value.status_code == 401
