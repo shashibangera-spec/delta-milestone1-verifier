@@ -12,6 +12,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg.rows import dict_row
 
+from amt_engine.playbook_v13 import classify_discovery
+
 EXPECTED_HOST = "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech"
 EXPECTED_DATABASE = "amt_research"
 EXPECTED_ROLE = "amt_dashboard_ro"
@@ -58,13 +60,16 @@ def _connect():
 def _discovery(closes, vah, val):
     if not closes or vah is None or val is None:
         return "UNKNOWN"
-    last = float(closes[-1]["close_value"])
-    previous = float(closes[-2]["close_value"]) if len(closes) > 1 else None
-    if last > float(vah):
-        return "DISCOVERY_ABOVE" if previous is not None and previous > float(vah) else "DISCOVERY_CANDIDATE_ABOVE"
-    if last < float(val):
-        return "DISCOVERY_BELOW" if previous is not None and previous < float(val) else "DISCOVERY_CANDIDATE_BELOW"
-    return "IN_VALUE"
+    ordered = sorted(closes, key=lambda row: row["candle_time"])
+    times = [row["candle_time"].astimezone(timezone.utc) for row in ordered]
+    if times[0].hour != 0 or times[0].minute != 0:
+        return "UNKNOWN"
+    if any((right - left) != timedelta(minutes=30) for left, right in zip(times, times[1:])):
+        return "UNKNOWN"
+    return classify_discovery(
+        [float(row["close_value"]) for row in ordered],
+        float(vah), float(val)
+    )
 
 
 def load_overview():
@@ -110,14 +115,17 @@ def load_overview():
                            FROM research.delta_candles
                            WHERE source='delta_india' AND series_type='PRICE' AND symbol='BTCUSD'
                              AND resolution='30m'
-                           ORDER BY candle_time DESC LIMIT 2""")
-            latest_price_rows = list(reversed(cur.fetchall()))
+                             AND candle_time >= %s
+                             AND candle_time + interval '30 minutes' <= %s
+                           ORDER BY candle_time""", (session_start, now))
+            latest_price_rows = cur.fetchall()
 
             cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
                            FROM research.delta_candles
                            WHERE source='delta_india' AND series_type='OI' AND symbol='OI:BTCUSD'
                              AND resolution='30m' AND candle_time >= %s
-                           ORDER BY candle_time""", (session_start,))
+                             AND retrieved_at <= %s
+                           ORDER BY retrieved_at""", (session_start, now))
             oi_rows = cur.fetchall()
 
             cur.execute("""SELECT trade_key,session_date,pattern,side,status,signal_candle_close,
