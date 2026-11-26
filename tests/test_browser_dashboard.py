@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
-from browser_dashboard.main import _connect, _discovery, require_dashboard_auth
+from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _validated_database_url, require_dashboard_auth
 
 
 def rows(*closes):
@@ -41,8 +41,30 @@ def test_dashboard_refuses_non_production_host_before_connecting(monkeypatch):
         "DATABASE_URL",
         "postgresql://amt_dashboard_ro:secret@ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech/amt_research",
     )
-    with pytest.raises(RuntimeError, match="production amt_dashboard_ro"):
+    with pytest.raises(RuntimeError, match="approved amt_dashboard_ro"):
         _connect()
+
+
+def test_dashboard_accepts_approved_neon_pooler_host(monkeypatch):
+    url = (
+        "postgresql://amt_dashboard_ro:secret@"
+        "ep-morning-mountain-aopl02wv-pooler.c-2.ap-southeast-1.aws.neon.tech/"
+        "amt_research"
+    )
+    monkeypatch.setenv("DATABASE_URL", url)
+    assert _validated_database_url("DATABASE_URL", EXPECTED_HOST) == url
+
+
+def test_dashboard_rejects_wrong_branch_host(monkeypatch):
+    monkeypatch.setenv(
+        "SOURCE_DATABASE_URL",
+        "postgresql://amt_dashboard_ro:secret@ep-wrong-branch.c-2.ap-southeast-1.aws.neon.tech/amt_research",
+    )
+    with pytest.raises(RuntimeError, match="approved amt_dashboard_ro"):
+        _validated_database_url(
+            "SOURCE_DATABASE_URL",
+            "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech",
+        )
 
 
 def test_dashboard_requires_configured_basic_auth(monkeypatch):
