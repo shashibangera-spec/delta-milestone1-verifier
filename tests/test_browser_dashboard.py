@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
 from browser_dashboard.auction_context import build_prior_auction_context
-from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _json, _validated_database_url, require_dashboard_auth
+from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _json, _session_rows, _validated_database_url, require_dashboard_auth
 
 
 def rows(*closes):
@@ -147,3 +147,14 @@ def test_subsession_ranges_and_extensions_are_descriptive():
     assert result["subsessions"][0]["development"] == "Above prior range"
     assert result["subsessions"][1]["development"] == "Below prior range"
     assert result["informational_only"] is True
+
+
+def test_dashboard_discovery_rows_are_scoped_to_current_utc_day():
+    previous_day = rows(60500, 60600)
+    current_day = [
+        {"candle_time": datetime(2026, 11, 26, 0, 0, tzinfo=timezone.utc), "close_value": 59500},
+        {"candle_time": datetime(2026, 11, 26, 0, 30, tzinfo=timezone.utc), "close_value": 59600},
+    ]
+    selected = _session_rows(previous_day + current_day, date(2026, 11, 26))
+    assert selected == current_day
+    assert _discovery(selected, 60000, 59000) == "IN_VALUE"
