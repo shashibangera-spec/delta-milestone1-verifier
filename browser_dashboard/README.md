@@ -4,7 +4,7 @@ A standalone single-page FastAPI dashboard. It reads the production `amt_researc
 
 ## Railway deployment
 
-Deploy this repository as a separate Railway service with **Root Directory** set to `/browser_dashboard` and Dockerfile path `Dockerfile`.
+Deploy this repository as a separate Railway service with the repository root as the build context (leave **Root Directory** blank) and Dockerfile path `browser_dashboard/Dockerfile`.
 
 Set these Railway service variables:
 
