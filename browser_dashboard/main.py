@@ -144,26 +144,26 @@ def load_overview():
                                 (reference_id,))
                     prior_profile = cur.fetchone()
 
-        # Live candles are read from the collector branch; production AMT profiles
-        # and the shadow ledger remain on the production branch above/below.
-        with _connect("SOURCE_DATABASE_URL", EXPECTED_SOURCE_HOST) as source_conn:
-            with source_conn.cursor() as source_cur:
-                source_cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value,retrieved_at
-                                      FROM research.delta_candles
-                                      WHERE source='delta_india' AND series_type='PRICE' AND symbol='BTCUSD'
-                                        AND resolution='30m'
-                                        AND candle_time >= %s
-                                        AND candle_time + interval '30 minutes' <= %s
-                                      ORDER BY candle_time""", (session_start, now))
-                latest_price_rows = source_cur.fetchall()
+            # Live candles are read from the collector branch; production AMT profiles
+            # and the shadow ledger remain on the production branch above/below.
+            with _connect("SOURCE_DATABASE_URL", EXPECTED_SOURCE_HOST) as source_conn:
+                with source_conn.cursor() as source_cur:
+                    source_cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value,retrieved_at
+                                          FROM research.delta_candles
+                                          WHERE source='delta_india' AND series_type='PRICE' AND symbol='BTCUSD'
+                                            AND resolution='30m'
+                                            AND candle_time >= %s
+                                            AND candle_time + interval '30 minutes' <= %s
+                                          ORDER BY candle_time""", (session_start, now))
+                    latest_price_rows = source_cur.fetchall()
 
-                source_cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
-                                      FROM research.delta_candles
-                                      WHERE source='delta_india' AND series_type='OI' AND symbol='OI:BTCUSD'
-                                        AND resolution='30m' AND candle_time >= %s
-                                        AND retrieved_at <= %s
-                                      ORDER BY retrieved_at""", (session_start, now))
-                oi_rows = source_cur.fetchall()
+                    source_cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
+                                          FROM research.delta_candles
+                                          WHERE source='delta_india' AND series_type='OI' AND symbol='OI:BTCUSD'
+                                            AND resolution='30m' AND candle_time >= %s
+                                            AND retrieved_at <= %s
+                                          ORDER BY retrieved_at""", (session_start, now))
+                    oi_rows = source_cur.fetchall()
 
             cur.execute("""SELECT trade_key,session_date,pattern,side,status,signal_candle_close,
                                   entry_time_utc,entry_price,stop_price,target_price,risk_points,
