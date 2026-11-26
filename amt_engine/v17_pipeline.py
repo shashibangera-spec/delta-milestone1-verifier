@@ -6,14 +6,14 @@ from urllib.parse import urlparse
 import psycopg
 from psycopg.rows import dict_row
 from amt_engine.v17_writer import (
-    BRANCH_ID, DATABASE_NAME, DATABASE_ROLE, PROJECT_ID, SOURCE, SYMBOL,
+    BRANCH_ID, BRANCH_HOSTS, DATABASE_NAME, DATABASE_ROLE, PROJECT_ID, SOURCE, SYMBOL,
     RESOLUTION, CANDLE_INTERVAL, persist_session, session_bounds_utc,
     validate_envelope, validate_target_environment,
 )
 
 SOURCE_BRANCH = "br-lingering-grass-ao07mgrx"
 SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech"
-TARGET_HOST = "ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech"
+TARGET_HOSTS = BRANCH_HOSTS
 METHOD = "AMT_ENGINE_V1.7"
 
 class PipelineError(RuntimeError): pass
@@ -41,9 +41,13 @@ def _source_conn(env):
     return _connect_ro(env.get("V17_SOURCE_DATABASE_URL"), SOURCE_HOST, "amt_dashboard_ro", "Source")
 
 def _target_ro_conn(env):
-    if env.get("V17_TARGET_READ_BRANCH_ID") != BRANCH_ID:
+    target_branch = env.get("V17_TARGET_READ_BRANCH_ID")
+    if target_branch != BRANCH_ID:
         raise PipelineError("V17_TARGET_READ_BRANCH_ID mismatch")
-    return _connect_ro(env.get("V17_TARGET_READONLY_DATABASE_URL"), TARGET_HOST, "amt_dashboard_ro", "Target read-only")
+    hosts = TARGET_HOSTS.get(target_branch, set())
+    if len(hosts) != 1:
+        raise PipelineError("Target branch must have exactly one pinned production/development host")
+    return _connect_ro(env.get("V17_TARGET_READONLY_DATABASE_URL"), next(iter(hosts)), "amt_dashboard_ro", "Target read-only")
 
 def _records(conn, d, series, symbol):
     start, end = session_bounds_utc(d)

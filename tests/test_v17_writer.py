@@ -75,6 +75,23 @@ def test_target_environment_requires_exact_isolated_branch():
         validate_target_environment(env)
 
 
+def test_production_branch_requires_exact_production_endpoint(monkeypatch):
+    import amt_engine.v17_writer as writer
+
+    monkeypatch.setattr(writer, "BRANCH_ID", writer.PRODUCTION_BRANCH_ID)
+    monkeypatch.setattr(writer, "ALLOWED_HOSTS", writer.BRANCH_HOSTS[writer.PRODUCTION_BRANCH_ID])
+    env = {
+        "NEON_PROJECT_ID": writer.PROJECT_ID,
+        "NEON_BRANCH_ID": writer.PRODUCTION_BRANCH_ID,
+        "NEON_DATABASE_NAME": writer.DATABASE_NAME,
+        "DATABASE_URL": "postgresql://amt_v17_writer_login:secret@ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech/amt_research",
+    }
+    writer.validate_target_environment(env)
+    env["DATABASE_URL"] = "postgresql://amt_v17_writer_login:secret@ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech/amt_research"
+    with pytest.raises(writer.IdentityError, match="host does not match"):
+        writer.validate_target_environment(env)
+
+
 def test_wrong_database_role_is_rejected():
     conn = MagicMock()
     cursor = MagicMock()
