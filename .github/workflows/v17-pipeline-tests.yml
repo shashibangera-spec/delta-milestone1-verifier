@@ -3,6 +3,7 @@ name: V1.7 backfill pipeline offline tests
 on:
   push:
     branches:
+      - main
       - feat/v17-historical-backfill-daily-pipeline
       - feat/gate-d-e-playbook-v13-dashboard
     paths:
@@ -33,7 +34,7 @@ concurrency:
 
 jobs:
   offline-pipeline-tests:
-    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/v17-historical-backfill-daily-pipeline' || github.head_ref == 'feat/gate-d-e-playbook-v13-dashboard') || github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline' || github.ref == 'refs/heads/feat/gate-d-e-playbook-v13-dashboard'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/v17-historical-backfill-daily-pipeline' || github.head_ref == 'feat/gate-d-e-playbook-v13-dashboard') || github.ref == 'refs/heads/feat/v17-historical-backfill-daily-pipeline' || github.ref == 'refs/heads/feat/gate-d-e-playbook-v13-dashboard' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
