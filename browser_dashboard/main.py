@@ -106,7 +106,7 @@ def load_overview():
                            LEFT JOIN amt_engine_v17.session_oi_context o USING(profile_id)
                            WHERE p.source='delta_india' AND p.symbol='BTCUSD'
                              AND p.method_version='AMT_ENGINE_V1.7'
-                             AND p.profile_status='COMPLETE' AND p.is_complete=true
+                             AND p.profile_status IN ('DEVELOPING','COMPLETE')
                            ORDER BY p.session_date DESC LIMIT 1""")
             profile = cur.fetchone()
 
@@ -123,11 +123,15 @@ def load_overview():
                                WHERE profile_id=%s""", (profile["profile_id"],))
                 developing = cur.fetchone()
                 if profile.get("profile_id"):
+                    reference_id = (
+                        profile["reference_profile_id"]
+                        if profile["profile_status"] == "DEVELOPING"
+                        else profile["profile_id"]
+                    )
                     cur.execute("""SELECT profile_id,session_date,poc_lower,poc_upper,vah_upper,val_lower
                                    FROM amt_engine_v17.session_profiles
-                                   WHERE profile_id=(SELECT reference_profile_id
-                                     FROM amt_engine_v17.session_profiles WHERE profile_id=%s)""",
-                                (profile["profile_id"],))
+                                   WHERE profile_id=%s AND profile_status='COMPLETE' AND is_complete=true""",
+                                (reference_id,))
                     prior_profile = cur.fetchone()
 
             cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value,retrieved_at
@@ -164,8 +168,8 @@ def load_overview():
                            FROM amt_engine_v17.playbook_v13_shadow_trades""")
             shadow_totals = cur.fetchone()
 
-    vah = profile.get("vah_upper") if profile else None
-    val = profile.get("val_lower") if profile else None
+    vah = prior_profile.get("vah_upper") if prior_profile else None
+    val = prior_profile.get("val_lower") if prior_profile else None
     live_discovery = _discovery(latest_price_rows, vah, val)
     opening_row = next(
         (row for row in oi_rows if row["candle_time"].astimezone(timezone.utc) == session_start),
@@ -288,8 +292,8 @@ async function refresh(){
  const dis=document.getElementById('discovery');dis.textContent=l.discovery||'UNKNOWN';dis.className='metric '+cls(l.discovery);
  const oi=l.oi||{};const oiEl=document.getElementById('oi-class');oiEl.textContent=oi.class||'UNKNOWN';oiEl.className='metric '+cls(oi.class);
  document.getElementById('oi-delta').textContent=oi.delta===null?'OI unavailable':'Δ '+fmt(oi.delta)+' BTC';
- document.getElementById('vah').textContent=fmt(p.vah_upper);document.getElementById('poc').textContent=fmt(p.poc_lower)+'–'+fmt(p.poc_upper);document.getElementById('val').textContent=fmt(p.val_lower);
- document.getElementById('profile-meta').textContent=p.session_date?'Session '+p.session_date+' · '+p.profile_status+' · '+p.observed_bars+'/48 candles':'No complete V1.7 profile';
+ document.getElementById('vah').textContent=fmt((d.prior_profile||{}).vah_upper);document.getElementById('poc').textContent=fmt((d.prior_profile||{}).poc_lower)+'–'+fmt((d.prior_profile||{}).poc_upper);document.getElementById('val').textContent=fmt((d.prior_profile||{}).val_lower);
+ document.getElementById('profile-meta').textContent=p.session_date?'Developing session '+p.session_date+' · '+p.profile_status+' · '+p.observed_bars+'/48 candles · prior reference '+((d.prior_profile||{}).session_date||'unavailable'):'No V1.7 session profile';
  document.getElementById('dvah').textContent=fmt(v.dvah);document.getElementById('dpoc').textContent=fmt(v.dpoc_lower)+'–'+fmt(v.dpoc_upper);document.getElementById('dval').textContent=fmt(v.dval);
  document.getElementById('developing-meta').textContent=v.progress?'Persisted progress '+v.progress+' · last candle close '+(v.last_candle_close?new Date(v.last_candle_close).toISOString():'—'):'No developing snapshots';
  const state=sh.state||{};document.getElementById('shadow-state').textContent=state.shadow_started_at?'Started '+new Date(state.shadow_started_at).toISOString().slice(0,16)+' · baseline '+fmt(state.starting_realized_r)+'R':'Shadow migration not applied';
