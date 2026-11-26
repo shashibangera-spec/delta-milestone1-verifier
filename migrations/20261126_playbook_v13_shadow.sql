@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS amt_engine_v17.playbook_v13_shadow_events (
 CREATE INDEX IF NOT EXISTS playbook_v13_shadow_events_time_idx
 ON amt_engine_v17.playbook_v13_shadow_events(event_at DESC);
 
+-- Database-level guard: only one open position can exist across all sessions.
+CREATE UNIQUE INDEX IF NOT EXISTS playbook_v13_shadow_one_open_trade_idx
+ON amt_engine_v17.playbook_v13_shadow_trades ((status))
+WHERE status = 'OPEN';
+
 CREATE OR REPLACE FUNCTION amt_engine_v17.record_playbook_v13_shadow_event(
     p_trade_key text, p_event_type text, p_event_at timestamptz, p_payload jsonb
 ) RETURNS void
