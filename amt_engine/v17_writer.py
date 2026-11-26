@@ -17,9 +17,22 @@ import psycopg
 from psycopg.rows import dict_row
 
 PROJECT_ID = "old-surf-34279165"
-BRANCH_ID = "br-crimson-tooth-ao7oq469"
+DEVELOPMENT_BRANCH_ID = "br-crimson-tooth-ao7oq469"
+PRODUCTION_BRANCH_ID = "br-snowy-water-aog0ilqw"
+BRANCH_HOSTS = {
+    DEVELOPMENT_BRANCH_ID: {
+        "ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech",
+        "ep-old-bar-aoau4qop-pooler.c-2.ap-southeast-1.aws.neon.tech",
+        "ep-old-bar-aoau4qop-cqp.c-2.ap-southeast-1.aws.neon.tech",
+    },
+    PRODUCTION_BRANCH_ID: {
+        "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech",
+    },
+}
 DATABASE_NAME = "amt_research"
-DATABASE_ROLE = "amt_v17_writer_login"
+# Defaults remain pinned to the isolated development branch for local tests.
+BRANCH_ID = os.environ.get("NEON_BRANCH_ID", DEVELOPMENT_BRANCH_ID)
+DATABASE_ROLE = os.environ.get("V17_WRITER_DATABASE_ROLE", "amt_v17_writer_login")
 SCHEMA = "amt_engine_v17"
 SOURCE = "delta_india"
 SYMBOL = "BTCUSD"
@@ -29,11 +42,7 @@ OI_UNITS = "BTC"
 CANDLE_INTERVAL = timedelta(minutes=30)
 POST_CLOSE_INGESTION_GRACE = timedelta(minutes=10)
 IST = ZoneInfo("Asia/Kolkata")
-ALLOWED_HOSTS = {
-    "ep-old-bar-aoau4qop.c-2.ap-southeast-1.aws.neon.tech",
-    "ep-old-bar-aoau4qop-pooler.c-2.ap-southeast-1.aws.neon.tech",
-    "ep-old-bar-aoau4qop-cqp.c-2.ap-southeast-1.aws.neon.tech",
-}
+ALLOWED_HOSTS = BRANCH_HOSTS.get(BRANCH_ID, set())
 
 
 class IdentityError(RuntimeError):
@@ -49,9 +58,9 @@ def session_bounds_utc(session_date: date) -> tuple[datetime, datetime]:
 
 def validate_target_environment(env: dict[str, str]) -> None:
     if env.get("NEON_PROJECT_ID") != PROJECT_ID:
-        raise IdentityError("NEON_PROJECT_ID does not match the approved development project")
+        raise IdentityError("NEON_PROJECT_ID does not match the approved Neon project")
     if env.get("NEON_BRANCH_ID") != BRANCH_ID:
-        raise IdentityError("NEON_BRANCH_ID does not match the approved development branch")
+        raise IdentityError("NEON_BRANCH_ID does not match the configured target branch")
     if env.get("NEON_DATABASE_NAME") != DATABASE_NAME:
         raise IdentityError("NEON_DATABASE_NAME does not match the approved database")
     url = env.get("DATABASE_URL", "")
@@ -59,7 +68,7 @@ def validate_target_environment(env: dict[str, str]) -> None:
         raise IdentityError("DATABASE_URL is required")
     parsed = urlparse(url)
     if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in ALLOWED_HOSTS:
-        raise IdentityError("DATABASE_URL host does not match the isolated development endpoint")
+        raise IdentityError("DATABASE_URL host does not match the configured target branch endpoint")
     if parsed.path.lstrip("/") != DATABASE_NAME:
         raise IdentityError("DATABASE_URL database path does not match amt_research")
 
