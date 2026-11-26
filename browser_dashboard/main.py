@@ -17,6 +17,7 @@ from psycopg.rows import dict_row
 from amt_engine.playbook_v13 import classify_discovery
 
 EXPECTED_HOST = "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech"
+EXPECTED_SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech"
 EXPECTED_DATABASE = "amt_research"
 EXPECTED_ROLE = "amt_dashboard_ro"
 
@@ -53,13 +54,22 @@ def _json(value):
     return value
 
 
-def _connect():
-    url = os.environ.get("DATABASE_URL", "")
+def _validated_database_url(env_name, expected_host):
+    url = os.environ.get(env_name, "")
     parsed = urlparse(url)
-    if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname != EXPECTED_HOST:
-        raise RuntimeError("DATABASE_URL must be the production amt_dashboard_ro connection")
+    accepted_hosts = {
+        expected_host,
+        expected_host.replace(".c-", "-pooler.c-"),
+    }
+    if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in accepted_hosts:
+        raise RuntimeError(f"{env_name} must use its approved amt_dashboard_ro Neon branch connection")
     if parsed.path.lstrip("/") != EXPECTED_DATABASE:
-        raise RuntimeError("DATABASE_URL must target amt_research")
+        raise RuntimeError(f"{env_name} must target amt_research")
+    return url
+
+
+def _connect(env_name="DATABASE_URL", expected_host=EXPECTED_HOST):
+    url = _validated_database_url(env_name, expected_host)
     conn = psycopg.connect(url, sslmode="require", row_factory=dict_row)
     try:
         with conn.cursor() as cur:
@@ -96,7 +106,7 @@ def load_overview():
     session_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("""SELECT p.profile_id,p.session_date,p.method_version,p.profile_status,
+            cur.execute("""SELECT p.profile_id,p.reference_profile_id,p.session_date,p.method_version,p.profile_status,
                                   p.is_complete,p.expected_bars,p.observed_bars,p.missing_slots,
                                   p.duplicate_slots,p.invalid_slots,p.out_of_session_count,
                                   p.poc_lower,p.poc_upper,p.vah_upper,p.val_lower,p.total_tpos,
@@ -134,22 +144,26 @@ def load_overview():
                                 (reference_id,))
                     prior_profile = cur.fetchone()
 
-            cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value,retrieved_at
-                           FROM research.delta_candles
-                           WHERE source='delta_india' AND series_type='PRICE' AND symbol='BTCUSD'
-                             AND resolution='30m'
-                             AND candle_time >= %s
-                             AND candle_time + interval '30 minutes' <= %s
-                           ORDER BY candle_time""", (session_start, now))
-            latest_price_rows = cur.fetchall()
+            # Live candles are read from the collector branch; production AMT profiles
+            # and the shadow ledger remain on the production branch above/below.
+            with _connect("SOURCE_DATABASE_URL", EXPECTED_SOURCE_HOST) as source_conn:
+                with source_conn.cursor() as source_cur:
+                    source_cur.execute("""SELECT candle_time,open_value,high_value,low_value,close_value,retrieved_at
+                                          FROM research.delta_candles
+                                          WHERE source='delta_india' AND series_type='PRICE' AND symbol='BTCUSD'
+                                            AND resolution='30m'
+                                            AND candle_time >= %s
+                                            AND candle_time + interval '30 minutes' <= %s
+                                          ORDER BY candle_time""", (session_start, now))
+                    latest_price_rows = source_cur.fetchall()
 
-            cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
-                           FROM research.delta_candles
-                           WHERE source='delta_india' AND series_type='OI' AND symbol='OI:BTCUSD'
-                             AND resolution='30m' AND candle_time >= %s
-                             AND retrieved_at <= %s
-                           ORDER BY retrieved_at""", (session_start, now))
-            oi_rows = cur.fetchall()
+                    source_cur.execute("""SELECT candle_time,open_value,close_value,retrieved_at
+                                          FROM research.delta_candles
+                                          WHERE source='delta_india' AND series_type='OI' AND symbol='OI:BTCUSD'
+                                            AND resolution='30m' AND candle_time >= %s
+                                            AND retrieved_at <= %s
+                                          ORDER BY retrieved_at""", (session_start, now))
+                    oi_rows = source_cur.fetchall()
 
             cur.execute("""SELECT trade_key,session_date,pattern,side,status,signal_candle_close,
                                   entry_time_utc,entry_price,stop_price,target_price,risk_points,
