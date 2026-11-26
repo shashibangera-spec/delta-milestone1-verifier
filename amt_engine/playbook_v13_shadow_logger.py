@@ -11,7 +11,7 @@ from psycopg.rows import dict_row
 
 from amt_engine.playbook_v13 import (
     build_signal, classify_discovery, classify_oi, deterministic_trade_key,
-    evaluate_exit, session_end_exit,
+    evaluate_exit,
 )
 from amt_engine.v17_writer import (
     BRANCH_ID, BRANCH_HOSTS, DATABASE_NAME, DATABASE_ROLE, PROJECT_ID,
@@ -241,8 +241,6 @@ def run_shadow(now=None):
                                 f"DATA_GAP while a shadow trade is open: {previous_open.isoformat()} -> {candle_open.isoformat()}"
                             )
                         exit_result = evaluate_exit(open_trade, current)
-                        if exit_result is None and candle_open.hour == 23 and candle_open.minute == 30:
-                            exit_result = session_end_exit(open_trade, current)
                         if exit_result:
                             exit_payload = {
                                 **exit_result,
