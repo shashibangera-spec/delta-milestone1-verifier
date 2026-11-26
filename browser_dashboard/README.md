@@ -6,13 +6,15 @@ A standalone single-page FastAPI dashboard. It reads the production `amt_researc
 
 Deploy this repository as a separate Railway service with **Root Directory** set to `/browser_dashboard` and Dockerfile path `Dockerfile`.
 
-Set this Railway service variable:
+Set these Railway service variables:
 
 - `DATABASE_URL` — the production `amt_dashboard_ro` PostgreSQL connection for database `amt_research` on branch `br-snowy-water-aog0ilqw` (host `ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech`).
+- `DASHBOARD_USERNAME` — a username you choose.
+- `DASHBOARD_PASSWORD` — a strong password you choose; keep it in Railway variables, not in source control or chat.
 
 Do not use the writer credential. The app validates the exact production host, database and database role, then sets each query transaction to read-only. The value remains server-side and is never returned by an endpoint.
 
-Expose the service on its Railway-generated domain after the migration is applied and the read-only connection variable is configured. `/health` is the health-check path.
+Expose the service on its Railway-generated domain after the migration is applied and all three variables are configured. The dashboard UI and data API require HTTP Basic authentication. `/health` is the unauthenticated health-check path.
 
 ## Data shown
 
