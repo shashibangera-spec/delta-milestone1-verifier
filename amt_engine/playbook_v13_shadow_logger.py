@@ -246,7 +246,7 @@ def run_shadow(now=None):
                                 "session_date": session_key, "symbol": "BTCUSD",
                                 "pattern": signal.pattern, "side": signal.side,
                                 "signal_candle_open": _iso(candle_open),
-                                "signal_candle_close": close_key,
+                                "signal_candle_close": close_key, "entry_time_utc": close_key,
                                 "entry_price": signal.entry_price, "stop_price": signal.stop_price,
                                 "target_price": signal.target_price, "risk_points": signal.risk_points,
                                 "buffer_points": signal.buffer_points,
