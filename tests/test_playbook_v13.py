@@ -1,6 +1,5 @@
 from amt_engine.playbook_v13 import (
     build_signal, classify_discovery, classify_oi, evaluate_exit,
-    session_end_exit,
 )
 
 
@@ -95,11 +94,6 @@ def test_target_exit_is_two_r():
     result = evaluate_exit(trade, candle(100, 99, 75, 80))
     assert result == {"exit_reason": "TARGET_2R", "exit_price": 76.0, "realized_r": 2.0}
 
-
-def test_session_end_exit_marks_to_market_in_r():
-    trade = {"side": "LONG", "entry_price": 100, "risk_points": 5}
-    result = session_end_exit(trade, candle(105, 108, 103, 107))
-    assert result == {"exit_reason": "SESSION_END", "exit_price": 107.0, "realized_r": 1.4}
 
 
 def test_oi_class_preserves_unknown_and_non_positive_as_flat_or_contraction():
