@@ -138,13 +138,18 @@ def run_shadow(now=None):
         state = _load_state(target)
         start = state["shadow_started_at"].astimezone(timezone.utc)
         cursor = state["last_processed_candle_open"]
-        query_from = (cursor.astimezone(timezone.utc) - CANDLE) if cursor else (start - 2 * CANDLE)
+        # Rebuild complete-session context from UTC midnight (05:30 IST) so
+        # causal Discovery replay never starts from a truncated close sequence.
+        first_context_day = min(start.date(), cursor.date() if cursor else start.date())
+        query_from = datetime.combine(first_context_day, datetime.min.time(), tzinfo=timezone.utc)
         price_rows = _load_price_rows(source, query_from, now)
         oi_rows = _load_oi_rows(source, query_from, now)
 
         # Seed previous candle context, but process only candles after the durable cursor
         # and strictly after the approved fresh 0.0R shadow start.
-        oi_by_open = {r["candle_time"]: r for r in oi_rows}
+        oi_by_session = {}
+        for observation in oi_rows:
+            oi_by_session.setdefault(observation["candle_time"].date(), []).append(observation)
         processed = 0
         entries = 0
         exits = 0
@@ -191,25 +196,41 @@ def run_shadow(now=None):
                 }
                 closes = closes_by_session.setdefault(session_key, [])
                 closes.append(current["close"])
-                oi_row = oi_by_open.get(row["candle_time"])
-                oi_opening = opening_oi_by_session.get(session_key)
-                if session_key not in opening_oi_by_session:
-                    # First OI opening value of this UTC/05:30 IST session.
-                    with source.cursor() as cur:
-                        cur.execute("""SELECT open_value FROM research.delta_candles
-                                       WHERE source='delta_india' AND series_type='OI'
-                                         AND symbol='OI:BTCUSD' AND resolution='30m'
-                                         AND candle_time=%s LIMIT 1""",
-                                    (datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc),))
-                        first_oi = cur.fetchone()
-                    opening_oi_by_session[session_key] = first_oi["open_value"] if first_oi else None
-                    oi_opening = opening_oi_by_session[session_key]
-                oi_entry = oi_row["close_value"] if oi_row else None
-                oi_context = classify_oi(oi_opening, oi_entry)
+                # OI is sampled strictly as-of the signal candle close. A
+                # source observation retrieved later is never allowed to leak
+                # into the entry context, even if its candle timestamp matches.
+                session_oi = oi_by_session.get(session_date, [])
+                available_oi = [
+                    obs for obs in session_oi
+                    if obs["retrieved_at"] is not None
+                    and obs["retrieved_at"].astimezone(timezone.utc) <= candle_close
+                ]
+                opening_time = datetime.combine(
+                    session_date, datetime.min.time(), tzinfo=timezone.utc
+                )
+                opening_obs = next(
+                    (obs for obs in session_oi if obs["candle_time"].astimezone(timezone.utc) == opening_time),
+                    None,
+                )
+                opening_available = (
+                    opening_obs is not None
+                    and opening_obs["retrieved_at"] is not None
+                    and opening_obs["retrieved_at"].astimezone(timezone.utc) <= candle_close
+                )
+                opening_oi = opening_obs["open_value"] if opening_available else None
+                latest_oi = max(
+                    available_oi,
+                    key=lambda obs: obs["retrieved_at"].astimezone(timezone.utc),
+                    default=None,
+                )
+                entry_oi = latest_oi["close_value"] if latest_oi else None
+                oi_context = classify_oi(opening_oi, entry_oi)
                 discovery = "UNKNOWN"
                 profile = _prior_profile(target, session_date)
                 if profile:
-                    discovery = classify_discovery(closes[-2:], float(profile["vah_upper"]), float(profile["val_lower"]))
+                    discovery = classify_discovery(
+                        closes, float(profile["vah_upper"]), float(profile["val_lower"])
+                    )
 
                 open_trade = _open_trade(target)
                 exited_this_bar = False
@@ -256,11 +277,14 @@ def run_shadow(now=None):
                                 "discovery_state": discovery,
                                 **oi_context,
                                 "price_retrieved_at": _iso(row["retrieved_at"]),
-                                "oi_retrieved_at": _iso(oi_row["retrieved_at"]) if oi_row else None,
+                                "opening_oi_observation_time": _iso(opening_obs["candle_time"]) if opening_available else None,
+                                "opening_oi_retrieved_at": _iso(opening_obs["retrieved_at"]) if opening_available else None,
+                                "oi_observation_time": _iso(latest_oi["candle_time"]) if latest_oi else None,
+                                "oi_retrieved_at": _iso(latest_oi["retrieved_at"]) if latest_oi else None,
+                                "oi_units": "BTC",
                                 "entry_cutoff_at": close_key,
                                 "observation_candle_open": _iso(candle_open),
                                 "observation_candle_close": close_key,
-                                "oi_units": "BTC" if oi_row else None,
                                 "oi_observation_cutoff": close_key,
                             }
                             _record(writer, trade_key, "ENTRY", candle_close, entry_payload)
