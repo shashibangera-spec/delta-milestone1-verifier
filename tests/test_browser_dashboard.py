@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
+from browser_dashboard.auction_context import build_prior_auction_context
 from browser_dashboard.main import EXPECTED_HOST, _connect, _discovery, _json, _validated_database_url, require_dashboard_auth
 
 
@@ -97,3 +98,52 @@ def test_dashboard_json_serializes_uuid_and_date_values():
         "profile_id": "12345678-1234-5678-1234-567812345678",
         "session_date": "2026-11-26",
     }
+
+
+def test_prior_auction_classifies_close_migration_and_swing():
+    profiles = [
+        {"session_date": date(2026, 11, 25), "poc_lower": 100, "vah_upper": 110, "val_lower": 90},
+        {"session_date": date(2026, 11, 26), "poc_lower": 102, "vah_upper": 112, "val_lower": 92},
+    ]
+    candles = [
+        {"session_date": date(2026, 11, 25), "range": {"high": 115, "low": 85, "close": 105}},
+        {"session_date": date(2026, 11, 26), "range": {"high": 120, "low": 95, "close": 114}},
+    ]
+    result = build_prior_auction_context(profiles, candles, [])
+    assert result["close_location"] == "Above Value"
+    assert result["value_migration"] == "Migrating Up"
+    assert result["swing_structure"] == "HH/HL"
+
+
+def test_prior_auction_marks_mixed_value_migration():
+    profiles = [
+        {"session_date": date(2026, 11, 25), "poc_lower": 100, "vah_upper": 110, "val_lower": 90},
+        {"session_date": date(2026, 11, 26), "poc_lower": 102, "vah_upper": 109, "val_lower": 92},
+    ]
+    candles = [
+        {"session_date": date(2026, 11, 25), "range": {"high": 115, "low": 85, "close": 105}},
+        {"session_date": date(2026, 11, 26), "range": {"high": 116, "low": 86, "close": 100}},
+    ]
+    result = build_prior_auction_context(profiles, candles, [])
+    assert result["value_migration"] == "Overlapping or Mixed"
+    assert result["swing_structure"] == "HH/HL"
+
+
+def test_subsession_ranges_and_extensions_are_descriptive():
+    from datetime import datetime
+    profiles = [
+        {"session_date": date(2026, 11, 25), "poc_lower": 100, "vah_upper": 110, "val_lower": 90},
+        {"session_date": date(2026, 11, 26), "poc_lower": 102, "vah_upper": 112, "val_lower": 92},
+    ]
+    candles = [
+        {"session_date": date(2026, 11, 25), "range": {"high": 115, "low": 85, "close": 105}},
+        {"session_date": date(2026, 11, 26), "range": {"high": 120, "low": 95, "close": 114}},
+    ]
+    current = [
+        {"candle_time": datetime(2026, 11, 27, 0, 0, tzinfo=timezone.utc), "high_value": 121, "low_value": 100, "close_value": 118},
+        {"candle_time": datetime(2026, 11, 27, 8, 0, tzinfo=timezone.utc), "high_value": 119, "low_value": 94, "close_value": 96},
+    ]
+    result = build_prior_auction_context(profiles, candles, current)
+    assert result["subsessions"][0]["development"] == "Above prior range"
+    assert result["subsessions"][1]["development"] == "Below prior range"
+    assert result["informational_only"] is True
