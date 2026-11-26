@@ -143,17 +143,21 @@ $$;
 CREATE OR REPLACE FUNCTION amt_engine_v17.advance_playbook_v13_shadow_cursor(
     p_candle_open timestamptz
 ) RETURNS void
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, amt_engine_v17
-AS $
-    UPDATE amt_engine_v17.playbook_v13_shadow_state
-    SET last_processed_candle_open = GREATEST(
-            COALESCE(last_processed_candle_open, p_candle_open), p_candle_open
-        ),
-        updated_at = now()
-    WHERE singleton = true AND p_candle_open IS NOT NULL
-$;
+AS $cursor$
+BEGIN
+    IF p_candle_open IS NOT NULL THEN
+        UPDATE amt_engine_v17.playbook_v13_shadow_state
+        SET last_processed_candle_open = GREATEST(
+                COALESCE(last_processed_candle_open, p_candle_open), p_candle_open
+            ),
+            updated_at = now()
+        WHERE singleton = true;
+    END IF;
+END;
+$cursor$;
 
 REVOKE ALL ON amt_engine_v17.playbook_v13_shadow_state,
     amt_engine_v17.playbook_v13_shadow_trades,
