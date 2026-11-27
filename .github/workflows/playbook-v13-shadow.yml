@@ -1,4 +1,4 @@
-name: Playbook v1.3 production shadow logger
+name: Playbook v1.4 production shadow logger
 
 on:
   schedule:
@@ -9,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: playbook-v13-production-shadow
+  group: playbook-v14-production-shadow
   cancel-in-progress: false
 
 jobs:
   shadow-log:
-    name: Process completed 30m candles into the v1.3 shadow ledger
+    name: Process completed 30m candles into the v1.4 shadow ledger
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -53,5 +53,5 @@ jobs:
             fi
           done
 
-      - name: Run v1.3 shadow logger (no orders)
-        run: python -m amt_engine.playbook_v13_shadow_logger
+      - name: Run v1.4 shadow logger (no orders)
+        run: python -m amt_engine.playbook_v14_shadow_logger

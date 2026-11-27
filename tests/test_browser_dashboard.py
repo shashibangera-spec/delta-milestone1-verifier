@@ -230,7 +230,7 @@ def test_developing_value_card_disclaims_playbook_reference_replacement():
     assert "LIVE DEVELOPING VALUE" in HTML
     assert "CURRENT SESSION" in HTML
     assert "frozen Prior Reference VAH/POC/VAL" in HTML
-    assert "used by Playbook v1.3" in HTML
+    assert "used by Playbook v1.4" in HTML
 
 
 @pytest.mark.parametrize(
@@ -293,3 +293,10 @@ def test_btc_prior_structure_status_has_dedicated_nifty_style_pill_renderer():
     assert "btcStatusNode.textContent=statusText" in HTML
     assert "btcStatusNode.className='sub structure-status '" in HTML
     assert "liveNode.innerHTML=" not in HTML
+
+
+def test_dashboard_identifies_v14_shadow_mode_and_ledger():
+    from browser_dashboard.main import HTML, load_overview
+    assert "Playbook v1.4" in HTML
+    assert "SHADOW_V1_4" in HTML
+    assert "playbook_v14_shadow_trades" in __import__("inspect").getsource(load_overview)

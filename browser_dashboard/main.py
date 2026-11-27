@@ -1,4 +1,4 @@
-"""Single-page read-only V1.7 / Playbook v1.3 observation dashboard."""
+"""Single-page read-only V1.7 / Playbook v1.4 observation dashboard."""
 from __future__ import annotations
 
 import os
@@ -25,7 +25,7 @@ EXPECTED_SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.
 EXPECTED_DATABASE = "amt_research"
 EXPECTED_ROLE = "amt_dashboard_ro"
 
-app = FastAPI(title="BTC V1.7 / Playbook V1.3 Observation Dashboard")
+app = FastAPI(title="BTC V1.7 / Playbook V1.4 Observation Dashboard")
 security = HTTPBasic()
 _cache = {"at": 0.0, "data": None}
 
@@ -293,17 +293,17 @@ def load_overview():
                                   entry_time_utc,entry_price,stop_price,target_price,risk_points,
                                   discovery_state,opening_oi,entry_oi,oi_delta,oi_class,
                                   exit_candle_close,exit_price,exit_reason,realized_r
-                           FROM amt_engine_v17.playbook_v13_shadow_trades
+                           FROM amt_engine_v17.playbook_v14_shadow_trades
                            ORDER BY signal_candle_close DESC LIMIT 12""")
             trades = cur.fetchall()
 
             cur.execute("""SELECT shadow_started_at,last_processed_candle_open,starting_realized_r
-                           FROM amt_engine_v17.playbook_v13_shadow_state WHERE singleton=true""")
+                           FROM amt_engine_v17.playbook_v14_shadow_state WHERE singleton=true""")
             shadow_state = cur.fetchone()
             cur.execute("""SELECT COALESCE(sum(realized_r),0) AS realized_r,
                                   count(*) AS total_trades,
                                   count(*) FILTER (WHERE status='OPEN') AS open_trades
-                           FROM amt_engine_v17.playbook_v13_shadow_trades""")
+                           FROM amt_engine_v17.playbook_v14_shadow_trades""")
             shadow_totals = cur.fetchone()
 
     vah = prior_profile.get("vah_upper") if prior_profile else None
@@ -432,7 +432,7 @@ def index(_username: str = Depends(require_dashboard_auth)):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "btc-v17-v13-dashboard"}
+    return {"status": "ok", "service": "btc-v17-v14-dashboard"}
 
 
 @app.get("/api/overview")
@@ -508,7 +508,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
   <div class="level"><small>dPOC</small><b id="dpoc">—</b></div>
   <div class="level"><small>dVAL</small><b id="dval">—</b></div>
  </div>
- <div class="sub" id="developing-meta">Live intraday visual aid only · separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.3.</div>
+ <div class="sub" id="developing-meta">Live intraday visual aid only · separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.4.</div>
 </section>
 <section class="panel section"><h2>Prior Completed Auction · 00:00–00:00 UTC / 05:30–05:30 IST</h2>
  <div class="levels">
@@ -525,7 +525,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
  </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div><div class="sub structure-status amber" id="btc-prior-structure-status">PRIOR STRUCTURE UNAVAILABLE</div>
  <div class="sub">Range development only; factual comparison of completed 30m candles, no directional prediction</div>
 </section>
-<section class="panel section"><h2>Playbook V1.3 — active and recent shadow trades</h2>
+<section class="panel section"><h2>Playbook v1.4 · SHADOW_V1_4 — active and recent shadow trades</h2>
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 </section>
 <footer>Research-only. No order routing, alerts, or execution. Developing values show persisted candle-by-candle V1.7 snapshots; live price and causal state use the latest available completed source candles. Refreshes every 10 seconds.</footer>
@@ -578,7 +578,7 @@ async function refresh(){
  document.getElementById('profile-meta').textContent=p.session_date?'Developing session '+p.session_date+' · '+p.profile_status+' · '+p.observed_bars+'/48 candles · prior reference '+((d.prior_profile||{}).session_date||'unavailable'):'No V1.7 session profile';
  document.getElementById('developing-progress').textContent=v.progress||'0/48';
  document.getElementById('dvah').textContent=fmt(v.dvah);document.getElementById('dpoc').textContent=fmt(v.dpoc_lower)+'–'+fmt(v.dpoc_upper);document.getElementById('dval').textContent=fmt(v.dval);
- const developingStatus=v.status==='READY'?'Computed from '+(v.candle_count||0)+' completed 30m candles · V1.7 $50-bin TPO. Visual aid only; separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.3.':(v.status||'LIVE DEVELOPING PROFILE UNAVAILABLE')+' · No developing levels displayed. Visual aid only; Playbook v1.3 continues to use frozen Prior Reference VAH/POC/VAL.';
+ const developingStatus=v.status==='READY'?'Computed from '+(v.candle_count||0)+' completed 30m candles · V1.7 $50-bin TPO. Visual aid only; separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.4.':(v.status||'LIVE DEVELOPING PROFILE UNAVAILABLE')+' · No developing levels displayed. Visual aid only; Playbook v1.4 continues to use frozen Prior Reference VAH/POC/VAL.';
  document.getElementById('developing-meta').textContent=developingStatus;
  const state=sh.state||{};document.getElementById('shadow-state').textContent=state.shadow_started_at?'Started '+new Date(state.shadow_started_at).toISOString().slice(0,16)+' · baseline '+fmt(state.starting_realized_r)+'R':'Shadow migration not applied';
  const auction=d.auction_context||{};
