@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS amt_engine_v17.playbook_v14_shadow_events (
 );
 CREATE INDEX IF NOT EXISTS playbook_v14_shadow_events_time_idx
 ON amt_engine_v17.playbook_v14_shadow_events(event_at DESC);
+CREATE INDEX IF NOT EXISTS playbook_v14_shadow_events_session_subsession_idx
+ON amt_engine_v17.playbook_v14_shadow_events
+    ((payload->>'session_date'),(payload->>'sub_session'))
+WHERE event_type='OPEN';
 
 CREATE OR REPLACE FUNCTION amt_engine_v17.record_playbook_v14_shadow_event(
     p_trade_key text, p_event_type text, p_event_at timestamptz, p_payload jsonb
