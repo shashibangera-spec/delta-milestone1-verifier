@@ -98,11 +98,11 @@ def status_2a(bars,i,trend):
     if trend=="HH/HL":
         q=[(idx,v) for (_,p),(idx,v) in zip(lows,lows[1:]) if v>p]
         if not q:return "INTACT"
-        idx,level=q[-1]; broken=any(bars[k]["close"]<level for k in range(idx+2,i+1))
+        idx,level=q[-1]; broken=any(bars[k]["close"]<level for k in range(idx+2,i))
     else:
         q=[(idx,v) for (_,p),(idx,v) in zip(highs,highs[1:]) if v<p]
         if not q:return "INTACT"
-        idx,level=q[-1]; broken=any(bars[k]["close"]>level for k in range(idx+2,i+1))
+        idx,level=q[-1]; broken=any(bars[k]["close"]>level for k in range(idx+2,i))
     return "BROKEN" if broken else "INTACT"
 
 def utc_window(ts): return "Asia + Europe" if ts.time()<time(13,30) else "US Cash"
@@ -163,48 +163,99 @@ def test_pattern_a(profiles,bars):
     print(f"Unresolved Pattern A exits excluded: {unresolved}")
 
 def test_dv(bars,dv):
-    times=sorted(bars); index={t:i for i,t in enumerate(times)}; events=[]; first_out=set()
-    for ts in times:
-        if ts not in dv or ts.date() not in approved_dates():continue
-        b=bars[ts]; v=dv[ts]; c=b["close"]; vah=v["vah"]; val=v["val"]
-        if c>vah: direction="UP"; side="LONG"; boundary=vah; risk=c-boundary
-        elif c<val: direction="DOWN"; side="SHORT"; boundary=val; risk=boundary-c
-        else:continue
-        key=(ts.date(),direction)
-        if key in first_out or risk<=0:continue
-        first_out.add(key); win=utc_window(ts); month=ts.strftime("%Y-%m")
-        cont=exit_trade(ts,side,c,boundary,c+(2*risk if side=="LONG" else -2*risk),bars,times,index,month,win,"Continuation")
-        if cont:events.append(cont)
-        extreme=b["high"] if direction=="UP" else b["low"]
-        for rt in times[index[ts]+1:]:
-            if rt.date()!=ts.date():break
-            rb=bars[rt]; extreme=max(extreme,rb["high"]) if direction=="UP" else min(extreme,rb["low"])
-            if val<=rb["close"]<=vah:
-                rs="SHORT" if direction=="UP" else "LONG"; entry=rb["close"]; stop=extreme; rr=abs(entry-stop)
-                if rr>0:
-                    target=entry-2*rr if rs=="SHORT" else entry+2*rr
-                    reclaim=exit_trade(rt,rs,entry,stop,target,bars,times,index,rt.strftime("%Y-%m"),utc_window(rt),"Reclaim")
-                    if reclaim:events.append(reclaim)
-                break
-    # Controls are every non-event bar, exactly matched by month/window/side/risk and setup type.
+    times=sorted(bars); index={t:i for i,t in enumerate(times)}; events=[]
+    # A distinct excursion starts on the first completed close outside the
+    # then-current developing value. The developing boundaries remain causal
+    # and are refreshed at every subsequent completed candle.
+    for d in approved_dates():
+        day_times=[datetime.combine(d,time(0),UTC)+BAR*i for i in range(48)]
+        active=None
+        for ts in day_times:
+            b=bars[ts]; v=dv[ts]; close=b["close"]; vah=v["vah"]; val=v["val"]
+            if active is None:
+                if close>vah:
+                    side="LONG"; direction="UP"; boundary=vah
+                elif close<val:
+                    side="SHORT"; direction="DOWN"; boundary=val
+                else: continue
+                risk=abs(close-boundary)
+                if risk<=0: continue
+                cont=exit_trade(ts,side,close,boundary,
+                    close+(2*risk if side=="LONG" else -2*risk),
+                    bars,times,index,ts.strftime("%Y-%m"),utc_window(ts),"Continuation")
+                if cont:
+                    cont["risk_bucket"]=round(risk)
+                    events.append(cont)
+                active={"direction":direction,"boundary":boundary,
+                        "extreme":b["high"] if direction=="UP" else b["low"]}
+                continue
+
+            if active["direction"]=="UP":
+                active["extreme"]=max(active["extreme"],b["high"])
+            else:
+                active["extreme"]=min(active["extreme"],b["low"])
+
+            # A reclaim is a completed close inside the developing value
+            # available for this very candle, not the stale breakout snapshot.
+            if val<=close<=vah:
+                side="SHORT" if active["direction"]=="UP" else "LONG"
+                stop=active["extreme"]; risk=abs(close-stop)
+                if risk>0:
+                    target=close-2*risk if side=="SHORT" else close+2*risk
+                    tr=exit_trade(ts,side,close,stop,target,bars,times,index,
+                                  ts.strftime("%Y-%m"),utc_window(ts),"Reclaim")
+                    if tr:
+                        tr["risk_bucket"]=round(risk)
+                        events.append(tr)
+                active=None
+                continue
+
+            # A completed close through the opposite developing boundary ends
+            # the prior excursion and starts a new, separately counted one.
+            if active["direction"]=="UP" and close<val:
+                active=None
+                side="SHORT"; direction="DOWN"; boundary=val; risk=boundary-close
+            elif active["direction"]=="DOWN" and close>vah:
+                active=None
+                side="LONG"; direction="UP"; boundary=vah; risk=close-boundary
+            else:
+                continue
+            if risk<=0: continue
+            cont=exit_trade(ts,side,close,boundary,
+                close+(2*risk if side=="LONG" else -2*risk),
+                bars,times,index,ts.strftime("%Y-%m"),utc_window(ts),"Continuation")
+            if cont:
+                cont["risk_bucket"]=round(risk)
+                events.append(cont)
+            active={"direction":direction,"boundary":boundary,
+                    "extreme":b["high"] if direction=="UP" else b["low"]}
+
+    # Exact dollar matching means a $1 stop-distance bucket: event and control
+    # risks are rounded to the nearest whole dollar before matching.
     event_bars={x["entry_time"]-BAR for x in events}; controls=[]; match_keys=set()
     for e in events:
-        key=(e["month"],e["window"],e["side"],e["risk"],e["kind"])
-        if key in match_keys:continue
-        match_keys.add(key)
+        key=(e["month"],e["window"],e["side"],e["risk_bucket"],e["kind"])
+        if key in match_keys: continue
+        match_keys.add(key); risk=float(e["risk_bucket"])
         for ts in times:
-            if ts.date().strftime("%Y-%m")!=e["month"] or utc_window(ts)!=e["window"] or ts.date() in EXCLUDED or ts in event_bars:continue
-            entry=bars[ts]["close"]; risk=e["risk"]; stop=entry-risk if e["side"]=="LONG" else entry+risk
+            if (ts.date().strftime("%Y-%m")!=e["month"] or utc_window(ts)!=e["window"]
+                or ts.date() in EXCLUDED or ts in event_bars):
+                continue
+            entry=bars[ts]["close"]
+            stop=entry-risk if e["side"]=="LONG" else entry+risk
             target=entry+2*risk if e["side"]=="LONG" else entry-2*risk
-            tr=exit_trade(ts,e["side"],entry,stop,target,bars,times,index,e["month"],e["window"],"Control")
-            if tr:tr["match_key"]=key;controls.append(tr)
-    print("\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
-    print("Event: first outside close per UTC date and direction; continuation enters outside close; reclaim enters first later close inside same frozen dVA, stop beyond excursion extreme.")
-    print("Controls: every non-event bar matched on month, UTC window, direction and exact dollar stop-distance; 2R; stop-first.")
+            tr=exit_trade(ts,e["side"],entry,stop,target,bars,times,index,
+                          e["month"],e["window"],"Control")
+            if tr:
+                tr["match_key"]=key; controls.append(tr)
+
+    print("\\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
+    print("Events: first outside close per excursion; continuation enters that close; reclaim enters first later close inside contemporaneous developing value; stop at excursion extreme.")
+    print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and nearest whole-dollar stop-distance; 2R; stop-first.")
     for w in ("Asia + Europe","US Cash"):
         for kind in ("Continuation","Reclaim"):
             ev=[x for x in events if x["window"]==w and x["kind"]==kind]
-            keys={(x["month"],x["window"],x["side"],x["risk"],x["kind"]) for x in ev}
+            keys={(x["month"],x["window"],x["side"],x["risk_bucket"],x["kind"]) for x in ev}
             co=[x for x in controls if x.get("match_key") in keys]
             for label,rows in ((kind,ev),("Matched controls",co)):
                 n,wr,avg,tt,mt,dd=metrics(rows)
