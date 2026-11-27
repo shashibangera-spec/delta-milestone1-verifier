@@ -25,6 +25,10 @@ EXPECTED_SESSION_BARS = [
 ]
 
 
+class NSEAccessDenied(RuntimeError):
+    """NSE rejected the read-only request, commonly due to cloud-IP restrictions."""
+
+
 def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
     if frame is None or frame.empty:
         raise RuntimeError(f"{source}: returned no rows")
@@ -76,12 +80,17 @@ def fetch_yahoo(start: datetime, end: datetime) -> pd.DataFrame:
         prepost=False,
         progress=False,
         threads=False,
+        multi_level_index=False,
     )
     if raw is None or raw.empty:
         raise RuntimeError(f"Yahoo returned no rows for {SYMBOL} 15m period={YAHOO_PERIOD}")
+    # Newer yfinance releases may still return a MultiIndex for a single ticker.
+    # Flatten before reset_index so every OHLC selection is a one-dimensional Series.
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
     raw = raw.reset_index()
     if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = [c[0] if isinstance(c, tuple) else c for c in raw.columns]
+        raw.columns = raw.columns.get_level_values(0)
     frame = normalize_frame(raw, "Yahoo")
     print(
         "Yahoo exact candle timestamp span (IST): "
@@ -117,10 +126,16 @@ def fetch_nse(start: datetime, end: datetime) -> pd.DataFrame:
             f"NSE homepage handshake HTTP status={handshake.status_code}; "
             f"cookies_received={len(session.cookies)}"
         )
+        if handshake.status_code == 403:
+            raise NSEAccessDenied("NSE homepage cookie handshake returned HTTP 403")
         handshake.raise_for_status()
+    except NSEAccessDenied:
+        raise
     except requests.RequestException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         print(f"NSE homepage handshake failed: HTTP status={status!r}; error={exc}")
+        if status == 403:
+            raise NSEAccessDenied("NSE homepage cookie handshake returned HTTP 403") from exc
         raise RuntimeError(f"NSE homepage cookie handshake failed (HTTP {status}): {exc}") from exc
 
     chart_statuses: list[tuple[str, int]] = []
@@ -145,9 +160,16 @@ def fetch_nse(start: datetime, end: datetime) -> pd.DataFrame:
     client.session = session
     client._cookies_set = True
 
-    raw = client.historical(
-        NSE_SYMBOL, "IDX", start=start, end=end, interval="15m"
-    )
+    try:
+        raw = client.historical(
+            NSE_SYMBOL, "IDX", start=start, end=end, interval="15m"
+        )
+    except requests.HTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        print(f"NSE historical chart request failed: HTTP status={status!r}; error={exc}")
+        if status == 403:
+            raise NSEAccessDenied("NSE historical chart endpoint returned HTTP 403") from exc
+        raise
     if raw is None or raw.empty:
         last_status = chart_statuses[-1][1] if chart_statuses else None
         raise RuntimeError(
@@ -336,6 +358,9 @@ def main() -> int:
             print(f"Complete 13-bracket sessions: {len(sessions)}")
             rows = classify_rows(dict(sorted(sessions.items())[-10:]))
             print_table("Last 10 complete sessions — " + name, rows)
+        except NSEAccessDenied as exc:
+            print(f"SOURCE SKIP (non-fatal): {exc}")
+            results[name] = None
         except Exception as exc:
             print(f"SOURCE ERROR: {type(exc).__name__}: {exc}")
             traceback.print_exc()
@@ -384,14 +409,21 @@ def main() -> int:
         f"total_source_complete_sessions={total_complete}"
     )
     print("No database, repository data, or production service writes were performed.")
+    # Yahoo is the required source for this probe. NSE is a secondary cross-check:
+    # its 403 response from GitHub-hosted runners must not invalidate Yahoo profiles.
+    if yahoo is not None and len(yahoo) > 0:
+        print("SUCCESS: Yahoo ^NSEI produced complete 13-bracket sessions; NSE cross-check is optional.")
+        if nse is None:
+            print("NSE was unavailable/skipped; retaining Yahoo-only profile output.")
+        return 0
     if len(failed_sources) == 2:
         print("FATAL: both data sources failed; returning exit status 1.")
         return 1
     if total_complete == 0:
-        print("FATAL: zero complete 13-bracket sessions across all sources; returning exit status 1.")
+        print("FATAL: zero complete 13-bracket sessions; returning exit status 1.")
         return 1
     if failed_sources:
-        print("WARNING: one source failed; available source results are partial.")
+        print("WARNING: Yahoo produced no complete sessions; only secondary-source data is available.")
     return 0
 
 
