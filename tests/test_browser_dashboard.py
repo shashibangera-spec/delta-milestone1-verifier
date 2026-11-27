@@ -19,34 +19,45 @@ def rows(*closes):
 
 
 
-def test_subsession_value_progression_uses_completed_candles_and_strict_value_steps():
+def test_subsession_value_progression_starts_with_prior_overnight_and_compares_in_order():
     day = date(2026, 11, 28)
     start = datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc)
+    prior_start = start - timedelta(hours=4)
     candles = [
+        {
+            "candle_time": prior_start + timedelta(minutes=30 * i),
+            "open_value": 10, "high_value": 100, "low_value": 0, "close_value": 90,
+        }
+        for i in range(8)
+    ]
+    candles.extend([
         {"candle_time": start, "open_value": 110, "high_value": 200, "low_value": 100, "close_value": 190},
         {"candle_time": start + timedelta(hours=8), "open_value": 210, "high_value": 300, "low_value": 200, "close_value": 290},
         {"candle_time": start + timedelta(hours=13, minutes=30), "open_value": 160, "high_value": 250, "low_value": 150, "close_value": 240},
         # This candle is not closed as of 14:15 UTC and must not enter the profile.
         {"candle_time": start + timedelta(hours=14), "open_value": 240, "high_value": 350, "low_value": 240, "close_value": 340},
-    ]
+    ])
 
     result = _calculate_subsession_value_progression(
         candles, day, start + timedelta(hours=14, minutes=15)
     )
 
-    assert [row["candles"] for row in result] == [1, 1, 1]
+    assert [row["candles"] for row in result] == [8, 1, 1, 1]
     assert [row["value_step"] for row in result] == [
-        "INITIAL", "VALUE STEPPED UP", "VALUE STEPPED DOWN"
+        "INITIAL", "VALUE STEPPED UP", "VALUE STEPPED UP", "VALUE STEPPED DOWN"
     ]
-    assert result[0]["sub_session"] == "Asia (00:00–08:00 UTC / 05:30–13:30 IST)"
-    assert result[1]["sub_session"] == "Europe (08:00–13:30 UTC / 13:30–19:00 IST)"
-    assert result[2]["sub_session"] == "US Cash (13:30–00:00 UTC / 19:00–05:30 IST)"
-    assert (result[0]["val"], result[0]["poc"], result[0]["vah"]) == (100, 125, 250)
-    assert (result[1]["val"], result[1]["poc"], result[1]["vah"]) == (200, 225, 350)
-    assert result[2]["open"] == 160
-    assert result[2]["close"] == 240
-    assert result[2]["candles"] == 1
-
+    assert [row["sub_session"] for row in result] == [
+        "Prior US Overnight (20:00–00:00 UTC / 01:30–05:30 IST)",
+        "Asia (00:00–08:00 UTC / 05:30–13:30 IST)",
+        "Europe (08:00–13:30 UTC / 13:30–19:00 IST)",
+        "US Cash (13:30–00:00 UTC / 19:00–05:30 IST)",
+    ]
+    assert (result[0]["val"], result[0]["poc"], result[0]["vah"]) == (0, 25, 150)
+    assert (result[1]["val"], result[1]["poc"], result[1]["vah"]) == (100, 125, 250)
+    assert (result[2]["val"], result[2]["poc"], result[2]["vah"]) == (200, 225, 350)
+    assert result[3]["open"] == 160
+    assert result[3]["close"] == 240
+    assert result[3]["candles"] == 1
 def test_dashboard_discovery_starts_on_first_close_outside_value():
     assert _discovery(rows(60500), 60000, 59000) == "DISCOVERY_ABOVE"
     assert _discovery(rows(58000), 60000, 59000) == "DISCOVERY_BELOW"
