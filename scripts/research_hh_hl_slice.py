@@ -83,11 +83,23 @@ def read_candles(c):
             raise ResearchError(f"{ts}: null OHLC")
         out[ts.date()].append({"timestamp":ts,"open":float(r["open_value"]),
           "high":float(r["high_value"]),"low":float(r["low_value"]),"close":float(r["close_value"])})
-    days=[START-timedelta(days=2),START-timedelta(days=1)]+[START+timedelta(days=i) for i in range((END-START).days+1)]
-    for d in days:
+    # Warm-up/context dates support the first in-scope session's prior-range
+    # classification and previous-close input. They are not research sessions
+    # and deliberately have no 48-bar completeness requirement.
+    context_days={START-timedelta(days=2), START-timedelta(days=1), date(2026,11,20)}
+    for d in sorted(context_days):
+        if not out.get(d):
+            raise ResearchError(f"{d}: source PRICE context is missing")
+
+    # Enforce exact 48-bar completeness only on the 189 approved sessions.
+    approved_days=[START+timedelta(days=i) for i in range((END-START).days+1)
+                   if START+timedelta(days=i) not in EXCLUDED]
+    if len(approved_days)!=189:
+        raise ResearchError(f"Internal scope error: expected 189 approved session dates, found {len(approved_days)}")
+    for d in approved_days:
         bars=out.get(d,[])
         if len(bars)!=48 or [x["timestamp"] for x in bars]!=[session_start(d)+BAR*i for i in range(48)]:
-            raise ResearchError(f"{d}: source PRICE series is not exactly 48 ordered 30m bars")
+            raise ResearchError(f"{d}: approved-session PRICE series is not exactly 48 ordered 30m bars")
     return dict(out)
 
 def prior_structure(d,ranges):
