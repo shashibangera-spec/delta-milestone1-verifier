@@ -522,7 +522,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
   <div class="level"><small>Asia · 00:00–08:00</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>Europe · 08:00–13:30</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>US · 13:30–00:00</small><b>—</b><div class="sub">Range / extension</div></div>
- </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div>
+ </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div><div class="sub structure-status amber" id="btc-prior-structure-status">PRIOR STRUCTURE UNAVAILABLE</div>
  <div class="sub">Range development only; factual comparison of completed 30m candles, no directional prediction</div>
 </section>
 <section class="panel section"><h2>Playbook V1.3 — active and recent shadow trades</h2>
@@ -593,8 +593,10 @@ async function refresh(){
   ? 'LIVE INTRADAY SWING VS PRIOR DAY · LIVE RANGE · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
   : 'LIVE INTRADAY RANGE · '+(liveSwing.label||'Unavailable')+' · Range comparison unavailable';
  const statusText=(priorStatus.label||'PRIOR STRUCTURE UNAVAILABLE')+(inflection.price_name?' · '+inflection.price_name+' '+fmt(inflection.price)+' · '+inflection.value_name+' '+fmt(inflection.value):'');
- const liveNode=document.getElementById('live-swing-vs-prior');
- liveNode.innerHTML='<div>'+liveSwingText+'</div><div class="structure-status '+(priorStatus.status==='BROKEN'?'red':priorStatus.status==='INTACT'?'green':'amber')+'>'+statusText+'</div>';
+ document.getElementById('live-swing-vs-prior').textContent=liveSwingText;
+ const btcStatusNode=document.getElementById('btc-prior-structure-status');
+ btcStatusNode.textContent=statusText;
+ btcStatusNode.className='sub structure-status '+(priorStatus.status==='BROKEN'?'red':priorStatus.status==='INTACT'?'green':'amber');
 
  document.getElementById('subsessions').innerHTML=(auction.subsessions||[]).map((s,i)=>{
   const range=s.range?fmt(s.range.low)+' – '+fmt(s.range.high):'Not started';
