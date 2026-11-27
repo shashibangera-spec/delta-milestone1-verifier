@@ -54,3 +54,33 @@ def test_summary_reports_gross_and_both_cost_scenarios_separately():
     assert result["total_gross_r"]==1.0
     assert result["costs"]["2.0"]["total_cost_r"]==pytest.approx(.12)
     assert result["costs"]["3.0"]["total_cost_r"]==pytest.approx(.18)
+
+
+def test_replay_pattern_a_passes_canonical_prices_to_evaluate_exit():
+    day = date(2026, 11, 27)
+    bars = [
+        {"open": 90, "high": 95, "low": 85, "close": 90},
+        # Pattern A SHORT: prior close inside value, upper wick tests VAH,
+        # then candle closes back inside. Width=20, so 5% buffer=1.
+        {"open": 90, "high": 101, "low": 89, "close": 95},
+        # Next candle reaches the calculated stop (101 + 1).
+        {"open": 95, "high": 102, "low": 90, "close": 96},
+    ]
+    session = {
+        "date": day,
+        "profile": {"vah": 100, "poc": 90, "val": 80},
+        "prior_profile": {"vah": 100, "poc": 90, "val": 80},
+        "bars": bars,
+    }
+
+    trades = replay_pattern_a([session])
+
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade["side"] == "SHORT"
+    assert trade["stop_price"] == pytest.approx(102)
+    assert trade["target_price"] == pytest.approx(81)
+    assert trade["exit_reason"] == "STOP"
+    assert trade["exit_price"] == pytest.approx(102)
+    assert trade["realized_r"] == -1.0
+
