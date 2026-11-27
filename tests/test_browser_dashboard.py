@@ -283,3 +283,12 @@ def test_dashboard_renders_live_intraday_swing_as_descriptive_visual_aid():
     from browser_dashboard.main import HTML
     assert "LIVE INTRADAY SWING VS PRIOR DAY" in HTML
     assert "factual comparison of completed 30m candles" in HTML
+
+
+def test_btc_prior_structure_status_uses_standalone_nifty_style_pill_renderer():
+    from browser_dashboard.main import HTML
+    assert 'id="btc-prior-structure-status"' in HTML
+    assert 'id="nifty-prior-structure-status"' in HTML
+    assert "btcStatusNode.textContent=statusText" in HTML
+    assert "btcStatusNode.className='sub structure-status '" in HTML
+    assert "liveNode.innerHTML=" not in HTML
