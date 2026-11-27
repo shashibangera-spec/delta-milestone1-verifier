@@ -186,7 +186,6 @@ def test_dv(bars,dv):
                     close+(2*risk if side=="LONG" else -2*risk),
                     bars,times,index,ts.strftime("%Y-%m"),utc_window(ts),"Continuation")
                 if cont:
-                    cont["risk_bucket"]=round(risk)
                     events.append(cont)
                 active={"direction":direction,"boundary":boundary,
                         "extreme":b["high"] if direction=="UP" else b["low"]}
@@ -207,7 +206,6 @@ def test_dv(bars,dv):
                     tr=exit_trade(ts,side,close,stop,target,bars,times,index,
                                   ts.strftime("%Y-%m"),utc_window(ts),"Reclaim")
                     if tr:
-                        tr["risk_bucket"]=round(risk)
                         events.append(tr)
                 active=None
                 continue
@@ -227,18 +225,17 @@ def test_dv(bars,dv):
                 close+(2*risk if side=="LONG" else -2*risk),
                 bars,times,index,ts.strftime("%Y-%m"),utc_window(ts),"Continuation")
             if cont:
-                cont["risk_bucket"]=round(risk)
                 events.append(cont)
             active={"direction":direction,"boundary":boundary,
                     "extreme":b["high"] if direction=="UP" else b["low"]}
 
-    # Stop distances are matched at exact whole-dollar precision: both event and
-    # control risk are assigned to the same nearest-$1 distance bucket.
+    # Every control uses the event trade's exact dollar stop distance; no
+    # risk-width binning or tolerance is applied.
     event_bars={x["entry_time"]-BAR for x in events}; controls=[]; match_keys=set(); approved=set(approved_dates())
     for e in events:
-        key=(e["month"],e["window"],e["side"],e["risk_bucket"],e["kind"])
+        key=(e["month"],e["window"],e["side"],e["risk"],e["kind"])
         if key in match_keys: continue
-        match_keys.add(key); risk=float(e["risk_bucket"])
+        match_keys.add(key); risk=e["risk"]
         for ts in times:
             if (ts.date().strftime("%Y-%m")!=e["month"] or utc_window(ts)!=e["window"]
                 or ts.date() not in approved or ts in event_bars):
@@ -253,11 +250,11 @@ def test_dv(bars,dv):
 
     print("\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
     print("Events: first outside close per excursion; continuation enters that close; reclaim enters first later close inside contemporaneous developing value; stop at excursion extreme.")
-    print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and exact whole-dollar stop-distance; 2R; stop-first.")
+    print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and exact dollar stop-distance; 2R; stop-first.")
     for w in ("Asia + Europe","US Cash"):
         for kind in ("Continuation","Reclaim"):
             ev=[x for x in events if x["window"]==w and x["kind"]==kind]
-            keys={(x["month"],x["window"],x["side"],x["risk_bucket"],x["kind"]) for x in ev}
+            keys={(x["month"],x["window"],x["side"],x["risk"],x["kind"]) for x in ev}
             co=[x for x in controls if x.get("match_key") in keys]
             for label,rows in ((kind,ev),("Matched controls",co)):
                 n,wr,avg,tt,mt,dd=metrics(rows)
