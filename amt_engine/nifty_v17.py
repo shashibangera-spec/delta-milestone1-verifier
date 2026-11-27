@@ -120,6 +120,11 @@ def persist_session(conn,frame,day,prior):
   q.execute("SELECT source_sha256,profile_sha256 FROM amt_nifty_v17.sessions WHERE session_date=%s",(day,)); old=q.fetchone()
   if old:
    if old["source_sha256"]!=src_sha or old["profile_sha256"]!=prof_sha: raise RuntimeError(f"{day}: existing Nifty fingerprint mismatch; refusing overwrite")
+   q.execute("SELECT completed_brackets,snapshot_sha256 FROM amt_nifty_v17.developing_snapshots WHERE session_date=%s ORDER BY completed_brackets",(day,))
+   stored=q.fetchall()
+   expected=[(x["completed_brackets"],x["snapshot_sha256"]) for x in snaps]
+   actual=[(x["completed_brackets"],x["snapshot_sha256"]) for x in stored]
+   if actual!=expected: raise RuntimeError(f"{day}: existing developing snapshot SHA/count mismatch; refusing skip")
    return {"date":day.isoformat(),"status":"SKIP_IDENTICAL","sha256":prof_sha}
   q.execute("""INSERT INTO amt_nifty_v17.sessions(session_date,row_size,value_area_fraction,expected_brackets,observed_brackets,is_complete,vah,poc,val,session_high,session_low,session_close,close_location,value_migration,range_structure,source_15m_rows,source_sha256,profile_sha256) VALUES(%s,10,.70,13,13,true,%s,%s,%s,%s,%s,%s,%s,%s,%s,25,%s,%s)""",(day,s["vah"],s["poc"],s["val"],s["session_high"],s["session_low"],s["session_close"],s["close_location"],s["value_migration"],s["range_structure"],src_sha,prof_sha))
   for x in snaps: q.execute("""INSERT INTO amt_nifty_v17.developing_snapshots(session_date,completed_brackets,dvah,dpoc,dval,total_tpos,snapshot_sha256) VALUES(%s,%s,%s,%s,%s,%s,%s)""",(day,x["completed_brackets"],x["vah"],x["poc"],x["val"],x["total_tpos"],x["snapshot_sha256"]))
