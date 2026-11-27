@@ -112,6 +112,116 @@ def _discovery(closes, vah, val):
     )
 
 
+
+def _calculate_v17_developing_profile(rows, session_start, now):
+    """Calculate a read-only current-session profile using the frozen V1.7 TPO rules.
+
+    Only a contiguous prefix of completed 30m candles from 00:00 UTC is eligible.
+    The profile is withheld if the available prefix contains a gap or invalid OHLC.
+    """
+    from decimal import ROUND_FLOOR, ROUND_CEILING
+
+    session_start = session_start.astimezone(timezone.utc)
+    now = now.astimezone(timezone.utc)
+    session_end = session_start + timedelta(hours=24)
+    completed = []
+    for row in sorted(rows, key=lambda item: item["candle_time"]):
+        candle_open = row["candle_time"].astimezone(timezone.utc)
+        candle_close = candle_open + timedelta(minutes=30)
+        if candle_open < session_start or candle_open >= session_end or candle_close > now:
+            continue
+        completed.append(row)
+
+    prefix = []
+    expected_open = session_start
+    status = "READY"
+    for row in completed:
+        candle_open = row["candle_time"].astimezone(timezone.utc)
+        if candle_open != expected_open:
+            status = "GAP_IN_COMPLETED_CANDLE_SEQUENCE"
+            break
+        try:
+            low = Decimal(str(row["low_value"]))
+            high = Decimal(str(row["high_value"]))
+        except Exception:
+            status = "INVALID_OHLC"
+            break
+        if not low.is_finite() or not high.is_finite() or low < 0 or high < low:
+            status = "INVALID_OHLC"
+            break
+        prefix.append((low, high))
+        expected_open += timedelta(minutes=30)
+
+    result = {
+        "progress": f"{len(prefix)}/48",
+        "candle_count": len(prefix),
+        "status": status if completed else "WAITING_FOR_FIRST_COMPLETED_CANDLE",
+        "method_version": "AMT_ENGINE_V1.7",
+        "row_size": 50,
+        "value_area_fraction": 0.70,
+        "session_start_utc": session_start,
+        "dvah": None,
+        "dpoc_lower": None,
+        "dpoc_upper": None,
+        "dval": None,
+        "total_tpos": None,
+    }
+    if not prefix or status != "READY":
+        return result
+
+    # V1.7: zero-anchored $50 bins; each candle hits floor(low/50)..floor(high/50),
+    # inclusive. The dense ladder retains zero-count rows between occupied bins.
+    counts = {}
+    for low, high in prefix:
+        low_idx = int((low / Decimal(50)).to_integral_value(rounding=ROUND_FLOOR))
+        high_idx = int((high / Decimal(50)).to_integral_value(rounding=ROUND_FLOOR))
+        for row_index in range(low_idx, high_idx + 1):
+            counts[row_index] = counts.get(row_index, 0) + 1
+
+    min_index = min(counts)
+    max_index = max(counts)
+    dense = {idx: counts.get(idx, 0) for idx in range(min_index, max_index + 1)}
+    total_tpos = sum(dense.values())
+    target_tpos = int(
+        (Decimal(total_tpos) * Decimal("0.70")).to_integral_value(rounding=ROUND_CEILING)
+    )
+
+    # V1.7 POC tie-break: lowest row_index among rows with the maximum TPO count.
+    max_count = max(dense.values())
+    poc_index = min(idx for idx, count in dense.items() if count == max_count)
+
+    lo_index = hi_index = poc_index
+    covered = dense[poc_index]
+    while covered < target_tpos and (lo_index > min_index or hi_index < max_index):
+        left_count = dense.get(lo_index - 1, 0)
+        right_count = dense.get(hi_index + 1, 0)
+        if lo_index == min_index:
+            choose_left = False
+        elif hi_index == max_index:
+            choose_left = True
+        else:
+            # V1.7 tie-break: equal adjacent counts choose the lower row.
+            choose_left = left_count >= right_count
+        if choose_left:
+            lo_index -= 1
+            covered += left_count
+        else:
+            hi_index += 1
+            covered += right_count
+
+    result.update({
+        "status": "READY",
+        "dvah": Decimal((hi_index + 1) * 50),
+        "dpoc_lower": Decimal(poc_index * 50),
+        "dpoc_upper": Decimal((poc_index + 1) * 50),
+        "dval": Decimal(lo_index * 50),
+        "total_tpos": total_tpos,
+        "target_tpos": target_tpos,
+        "value_area_tpos": covered,
+    })
+    return result
+
+
 def load_overview():
     now = datetime.now(timezone.utc)
     session_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -132,19 +242,9 @@ def load_overview():
                            ORDER BY p.session_date DESC LIMIT 1""")
             profile = cur.fetchone()
 
-            developing = None
             prior_profile = None
             completed_profiles = []
             if profile:
-                cur.execute("""SELECT count(*) AS snapshots,
-                                      (array_agg(developing_poc_lower ORDER BY candle_open DESC))[1] AS dpoc_lower,
-                                      (array_agg(developing_poc_upper ORDER BY candle_open DESC))[1] AS dpoc_upper,
-                                      (array_agg(developing_vah_upper ORDER BY candle_open DESC))[1] AS dvah,
-                                      (array_agg(developing_val_lower ORDER BY candle_open DESC))[1] AS dval,
-                                      max(candle_close) AS last_candle_close
-                               FROM amt_engine_v17.developing_snapshots
-                               WHERE profile_id=%s""", (profile["profile_id"],))
-                developing = cur.fetchone()
                 if profile.get("profile_id"):
                     reference_id = (
                         profile["reference_profile_id"]
@@ -207,6 +307,9 @@ def load_overview():
     vah = prior_profile.get("vah_upper") if prior_profile else None
     val = prior_profile.get("val_lower") if prior_profile else None
     current_session_rows = _session_rows(latest_price_rows, session_start.date())
+    live_developing = _calculate_v17_developing_profile(
+        current_session_rows, session_start, now
+    )
     live_discovery = _discovery(current_session_rows, vah, val)
     candle_days = {}
     for candle in latest_price_rows:
@@ -249,10 +352,7 @@ def load_overview():
         "as_of_utc": now,
         "profile": profile,
         "prior_profile": prior_profile,
-        "developing": {
-            **(developing or {}),
-            "progress": f"{int(developing['snapshots']) if developing else 0}/48",
-        } if profile else None,
+        "developing": live_developing,
         "auction_context": auction_context,
         "live": {
             "price": latest_price_rows[-1] if latest_price_rows else None,
@@ -325,13 +425,13 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}
  </div>
  <div class="sub" id="profile-meta">—</div>
 </section>
-<section class="panel section"><h2>Developing value — persisted V1.7 snapshots</h2>
+<section class="panel section"><h2>LIVE DEVELOPING VALUE · CURRENT SESSION (<span id="developing-progress">0/48</span> CANDLES)</h2>
  <div class="levels">
   <div class="level"><small>dVAH</small><b id="dvah">—</b></div>
   <div class="level"><small>dPOC</small><b id="dpoc">—</b></div>
   <div class="level"><small>dVAL</small><b id="dval">—</b></div>
  </div>
- <div class="sub" id="developing-meta">—</div>
+ <div class="sub" id="developing-meta">Live intraday visual aid only · separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.3.</div>
 </section>
 <section class="panel section"><h2>Prior Completed Auction · 00:00–00:00 UTC / 05:30–05:30 IST</h2>
  <div class="levels">
@@ -366,8 +466,10 @@ async function refresh(){
  document.getElementById('oi-delta').textContent=oi.delta===null?'OI unavailable':'Δ '+fmt(oi.delta)+' BTC';
  document.getElementById('vah').textContent=fmt((d.prior_profile||{}).vah_upper);document.getElementById('poc').textContent=fmt((d.prior_profile||{}).poc_lower)+'–'+fmt((d.prior_profile||{}).poc_upper);document.getElementById('val').textContent=fmt((d.prior_profile||{}).val_lower);
  document.getElementById('profile-meta').textContent=p.session_date?'Developing session '+p.session_date+' · '+p.profile_status+' · '+p.observed_bars+'/48 candles · prior reference '+((d.prior_profile||{}).session_date||'unavailable'):'No V1.7 session profile';
+ document.getElementById('developing-progress').textContent=v.progress||'0/48';
  document.getElementById('dvah').textContent=fmt(v.dvah);document.getElementById('dpoc').textContent=fmt(v.dpoc_lower)+'–'+fmt(v.dpoc_upper);document.getElementById('dval').textContent=fmt(v.dval);
- document.getElementById('developing-meta').textContent=v.progress?'Persisted progress '+v.progress+' · last candle close '+(v.last_candle_close?new Date(v.last_candle_close).toISOString():'—'):'No developing snapshots';
+ const developingStatus=v.status==='READY'?'Computed from '+(v.candle_count||0)+' completed 30m candles · V1.7 $50-bin TPO. Visual aid only; separate from frozen Prior Reference VAH/POC/VAL used by Playbook v1.3.':(v.status||'LIVE DEVELOPING PROFILE UNAVAILABLE')+' · No developing levels displayed. Visual aid only; Playbook v1.3 continues to use frozen Prior Reference VAH/POC/VAL.';
+ document.getElementById('developing-meta').textContent=developingStatus;
  const state=sh.state||{};document.getElementById('shadow-state').textContent=state.shadow_started_at?'Started '+new Date(state.shadow_started_at).toISOString().slice(0,16)+' · baseline '+fmt(state.starting_realized_r)+'R':'Shadow migration not applied';
  const auction=d.auction_context||{};
  document.getElementById('auction-close').textContent=auction.close_location||'Unavailable';
