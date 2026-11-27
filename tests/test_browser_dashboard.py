@@ -230,7 +230,7 @@ def test_developing_value_card_disclaims_playbook_reference_replacement():
     assert "LIVE DEVELOPING VALUE" in HTML
     assert "CURRENT SESSION" in HTML
     assert "frozen Prior Reference VAH/POC/VAL" in HTML
-    assert "used by Playbook v1.3" in HTML
+    assert "used by Playbook v1.4" in HTML
 
 
 @pytest.mark.parametrize(
