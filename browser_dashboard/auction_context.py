@@ -58,14 +58,13 @@ def build_prior_structure_status(prior_structure, current_high, current_low,
     if any(value is None for value in (current_high, current_low, prior_high, prior_low)):
         return {"status": "UNAVAILABLE", "label": "PRIOR STRUCTURE UNAVAILABLE",
                 "inflection": None}
-    live_label = classify_live_range(current_high, current_low, prior_high, prior_low)
     if structure == "HH/HL" and current_low < prior_low:
-        broken_to = "HH / LL (Outside)" if current_high > prior_high else "LL / LH"
+        broken_to = classify_live_range(current_high, current_low, prior_high, prior_low)
         return {"status": "BROKEN", "label": f"PRIOR HH / HL BROKEN → {broken_to}",
                 "inflection": {"price_name": "Prior Low", "price": prior_low,
                                "value_name": "Prior VAL", "value": prior_val}}
     if structure == "LL/LH" and current_high > prior_high:
-        broken_to = "HH / LL (Outside)" if current_low < prior_low else "HH / HL"
+        broken_to = classify_live_range(current_high, current_low, prior_high, prior_low)
         return {"status": "BROKEN", "label": f"PRIOR LL / LH BROKEN → {broken_to}",
                 "inflection": {"price_name": "Prior High", "price": prior_high,
                                "value_name": "Prior VAH", "value": prior_vah}}
