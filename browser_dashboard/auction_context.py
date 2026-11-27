@@ -33,6 +33,53 @@ def _direction(values):
     return "MIXED"
 
 
+
+def classify_live_range(current_high, current_low, prior_high, prior_low):
+    """Classify a completed live range against the prior completed session."""
+    if any(value is None for value in (current_high, current_low, prior_high, prior_low)):
+        return "Unavailable"
+    hh, hl = current_high > prior_high, current_low > prior_low
+    ll, lh = current_low < prior_low, current_high < prior_high
+    if hh and ll:
+        return "HH / LL (Outside)"
+    if hh and hl:
+        return "HH / HL"
+    if ll and lh:
+        return "LL / LH"
+    if current_high <= prior_high and current_low >= prior_low:
+        return "LH / HL (Inside)"
+    return "Mixed"
+
+
+def build_prior_structure_status(prior_structure, current_high, current_low,
+                                 prior_high, prior_low, prior_vah=None, prior_val=None):
+    """Describe whether today's completed range has crossed yesterday's structural extreme."""
+    structure = str(prior_structure or "Unavailable").upper().replace(" ", "")
+    if any(value is None for value in (current_high, current_low, prior_high, prior_low)):
+        return {"status": "UNAVAILABLE", "label": "PRIOR STRUCTURE UNAVAILABLE",
+                "inflection": None}
+    if structure == "HH/HL" and current_low < prior_low:
+        broken_to = classify_live_range(current_high, current_low, prior_high, prior_low)
+        return {"status": "BROKEN", "label": f"PRIOR HH / HL BROKEN → {broken_to}",
+                "inflection": {"price_name": "Prior Low", "price": prior_low,
+                               "value_name": "Prior VAL", "value": prior_val}}
+    if structure == "LL/LH" and current_high > prior_high:
+        broken_to = classify_live_range(current_high, current_low, prior_high, prior_low)
+        return {"status": "BROKEN", "label": f"PRIOR LL / LH BROKEN → {broken_to}",
+                "inflection": {"price_name": "Prior High", "price": prior_high,
+                               "value_name": "Prior VAH", "value": prior_vah}}
+    if structure == "HH/HL":
+        return {"status": "INTACT", "label": "PRIOR HH / HL INTACT", "inflection": {
+            "price_name": "Prior Low", "price": prior_low, "value_name": "Prior VAL", "value": prior_val}}
+    if structure == "LL/LH":
+        return {"status": "INTACT", "label": "PRIOR LL / LH INTACT", "inflection": {
+            "price_name": "Prior High", "price": prior_high, "value_name": "Prior VAH", "value": prior_vah}}
+    return {"status": "UNAVAILABLE", "label": f"PRIOR {str(prior_structure or 'STRUCTURE').upper()} — NO HH / HL OR LL / LH REFERENCE",
+            "inflection": {"price_name": "Prior Low", "price": prior_low,
+                           "value_name": "Prior VAL", "value": prior_val,
+                           "other_price_name": "Prior High", "other_price": prior_high,
+                           "other_value_name": "Prior VAH", "other_value": prior_vah}}
+
 def build_prior_auction_context(completed_profiles, completed_candles, developing_candles):
     """Build descriptive completed-auction and UTC sub-session context.
 
@@ -88,25 +135,19 @@ def build_prior_auction_context(completed_profiles, completed_candles, developin
     live_highs = [float(r["high_value"]) for r in rows if r.get("high_value") is not None]
     live_lows = [float(r["low_value"]) for r in rows if r.get("low_value") is not None]
     live_swing = {"label": "Unavailable", "current_range": None, "prior_range": None,
+                  "prior_structure_status": build_prior_structure_status(
+                      swing, None, None, prior_high, prior_low),
                   "completed_candles": len(rows)}
     if live_highs and live_lows and prior_high is not None and prior_low is not None:
         current_high, current_low = max(live_highs), min(live_lows)
-        hh, hl = current_high > prior_high, current_low > prior_low
-        ll, lh = current_low < prior_low, current_high < prior_high
-        if hh and ll:
-            label = "HH / LL (Outside)"
-        elif hh and hl:
-            label = "HH / HL"
-        elif ll and lh:
-            label = "LL / LH"
-        elif current_high <= prior_high and current_low >= prior_low:
-            label = "LH / HL (Inside)"
-        else:
-            label = "Mixed"
+        prior_profile = prior["profile"] if prior else {}
         live_swing = {
-            "label": label,
+            "label": classify_live_range(current_high, current_low, prior_high, prior_low),
             "current_range": {"low": current_low, "high": current_high},
             "prior_range": {"low": prior_low, "high": prior_high},
+            "prior_structure_status": build_prior_structure_status(
+                swing, current_high, current_low, prior_high, prior_low,
+                float(prior_profile["vah_upper"]), float(prior_profile["val_lower"])),
             "completed_candles": len(rows),
         }
     for name, start, end in definitions:
