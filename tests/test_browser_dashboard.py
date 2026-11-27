@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
 from browser_dashboard.auction_context import build_prior_auction_context
-from browser_dashboard.main import EXPECTED_HOST, _calculate_v17_developing_profile, _calculate_subsession_value_progression, _connect, _discovery, _json, _session_rows, _validated_database_url, require_dashboard_auth
+from browser_dashboard.main import EXPECTED_HOST, _calculate_v17_developing_profile, _calculate_subsession_value_progression, _calculate_nifty_intraday_value_progression, _connect, _discovery, _json, _session_rows, _validated_database_url, require_dashboard_auth
 
 
 def rows(*closes):
@@ -340,3 +340,55 @@ def test_dashboard_identifies_v14_shadow_mode_and_ledger():
     assert "Playbook v1.4" in HTML
     assert "SHADOW_V1_4" in HTML
     assert "playbook_v14_shadow_trades" in __import__("inspect").getsource(load_overview)
+
+
+def test_nifty_intraday_value_progression_uses_three_completed_bracket_windows():
+    from zoneinfo import ZoneInfo
+    from amt_engine.nifty_v17 import calculate_profile
+
+    day = date(2026, 11, 27)
+    ist = ZoneInfo("Asia/Kolkata")
+    bars = []
+    for bracket in range(1, 14):
+        base = 25000 if bracket <= 4 else (25100 if bracket <= 9 else 24900)
+        bars.append({
+            "bracket": bracket,
+            "start": (datetime.combine(day, datetime.min.time()) +
+                      timedelta(minutes=15 + 30 * (bracket - 1))).isoformat(),
+            "open": base, "high": base + 20, "low": base - 20, "close": base + 10,
+        })
+
+    result = _calculate_nifty_intraday_value_progression(
+        bars, day, datetime(2026, 11, 27, 15, 30, tzinfo=ist), calculate_profile
+    )
+
+    assert [row["candles"] for row in result] == [4, 5, 4]
+    assert [row["session"] for row in result] == [
+        "Morning Open / IB (09:15–11:15 IST · Brackets 1–4)",
+        "Midday Session (11:15–13:45 IST · Brackets 5–9)",
+        "Afternoon Close (13:45–15:30 IST · Brackets 10–13)",
+    ]
+    assert result[0]["value_step"] == "INITIAL"
+    assert result[1]["value_step"] == "VALUE STEPPED UP"
+    assert result[2]["value_step"] == "VALUE STEPPED DOWN"
+    assert result[0]["open"] == 25000
+    assert result[2]["close"] == 24910
+
+
+def test_nifty_intraday_value_progression_excludes_uncompleted_and_breaks_on_gaps():
+    from zoneinfo import ZoneInfo
+    from amt_engine.nifty_v17 import calculate_profile
+
+    day = date(2026, 11, 27)
+    ist = ZoneInfo("Asia/Kolkata")
+    bars = [{
+        "bracket": bracket, "open": 25000, "high": 25020,
+        "low": 24980, "close": 25010,
+    } for bracket in (1, 2, 4, 5, 6, 7, 8, 9)]
+    result = _calculate_nifty_intraday_value_progression(
+        bars, day, datetime(2026, 11, 27, 12, 0, tzinfo=ist), calculate_profile
+    )
+    assert result[0]["candles"] == 2
+    assert result[1]["candles"] == 0
+    assert result[1]["value_step"] == "NOT STARTED"
+    assert result[2]["candles"] == 0
