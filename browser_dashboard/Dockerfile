@@ -10,4 +10,4 @@ COPY amt_engine/__init__.py ./amt_engine/__init__.py
 COPY amt_engine/playbook_v13.py ./amt_engine/playbook_v13.py
 COPY amt_engine/nifty_v17.py ./amt_engine/nifty_v17.py
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port \${PORT:-8080}"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
