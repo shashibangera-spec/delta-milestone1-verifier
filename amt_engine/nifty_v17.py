@@ -108,7 +108,9 @@ def connect_writer(url=None):
  return c
 def migrate(conn):
  with conn.cursor() as q:
-  q.execute("CREATE SCHEMA IF NOT EXISTS amt_nifty_v17")
+  q.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'amt_nifty_v17'")
+  if q.fetchone() is None:
+   raise RuntimeError("Required schema amt_nifty_v17 does not exist; refusing to create a schema or request database-level privileges")
   for ddl in DDL: q.execute(ddl)
   q.execute("GRANT USAGE ON SCHEMA amt_nifty_v17 TO amt_dashboard_ro")
   q.execute("GRANT SELECT ON ALL TABLES IN SCHEMA amt_nifty_v17 TO amt_dashboard_ro")

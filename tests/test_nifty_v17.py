@@ -1,7 +1,7 @@
 from datetime import date,datetime,time,timedelta
 import pandas as pd
 import pytest
-from amt_engine.nifty_v17 import EXPECTED_DATES,EXPECTED_HOST,WRITER_ROLE,aggregate_session,calculate_profile,canonical_sha,classify_session,profile_rows,validate_54_sessions,validate_writer_url
+from amt_engine.nifty_v17 import EXPECTED_DATES,EXPECTED_HOST,WRITER_ROLE,aggregate_session,calculate_profile,canonical_sha,classify_session,profile_rows,validate_54_sessions,validate_writer_url,migrate
 
 def synthetic(days):
  rows=[]
@@ -62,3 +62,45 @@ def test_dashboard_adds_nifty_tab_without_changing_default_btc_view():
     assert "let activeMarket='btc'" in HTML
     assert 'id="btc-view"' in HTML and 'id="nifty-view"' in HTML
     assert any(route.path == "/api/nifty-overview" for route in app.routes)
+
+class _MigrationCursor:
+    def __init__(self, schema_exists):
+        self.schema_exists = schema_exists
+        self.statements = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, statement, params=None):
+        self.statements.append(statement)
+
+    def fetchone(self):
+        return (1,) if self.schema_exists else None
+
+
+class _MigrationConnection:
+    def __init__(self, schema_exists):
+        self.fake_cursor = _MigrationCursor(schema_exists)
+
+    def cursor(self):
+        return self.fake_cursor
+
+
+def test_migrate_checks_existing_schema_without_creating_it():
+    conn = _MigrationConnection(schema_exists=True)
+    migrate(conn)
+    statements = conn.fake_cursor.statements
+    assert statements[0] == "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'amt_nifty_v17'"
+    assert not any("CREATE SCHEMA" in sql for sql in statements)
+    assert any(sql.startswith("CREATE TABLE IF NOT EXISTS amt_nifty_v17.") for sql in statements)
+    assert any("GRANT SELECT ON ALL TABLES IN SCHEMA amt_nifty_v17 TO amt_dashboard_ro" in sql for sql in statements)
+
+
+def test_migrate_fails_closed_if_schema_does_not_exist():
+    conn = _MigrationConnection(schema_exists=False)
+    with pytest.raises(RuntimeError, match="Required schema amt_nifty_v17 does not exist"):
+        migrate(conn)
+    assert len(conn.fake_cursor.statements) == 1
