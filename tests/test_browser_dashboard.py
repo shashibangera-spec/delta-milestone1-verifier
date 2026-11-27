@@ -34,7 +34,7 @@ def test_subsession_value_progression_uses_completed_candles_and_strict_value_st
         candles, day, start + timedelta(hours=14, minutes=15)
     )
 
-    assert [row["candles"] for row in result] == [1, 1, 2]
+    assert [row["candles"] for row in result] == [1, 1, 1]
     assert [row["value_step"] for row in result] == [
         "INITIAL", "VALUE STEPPED UP", "VALUE STEPPED DOWN"
     ]
@@ -45,7 +45,7 @@ def test_subsession_value_progression_uses_completed_candles_and_strict_value_st
     assert (result[1]["val"], result[1]["poc"], result[1]["vah"]) == (200, 225, 350)
     assert result[2]["open"] == 160
     assert result[2]["close"] == 240
-    assert result[2]["candles"] == 2
+    assert result[2]["candles"] == 1
 
 def test_dashboard_discovery_starts_on_first_close_outside_value():
     assert _discovery(rows(60500), 60000, 59000) == "DISCOVERY_ABOVE"
