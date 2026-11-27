@@ -108,11 +108,11 @@ def pivot_status(bars,i,trend):
     if trend=="HH/HL":
         if len(lows)<2 or lows[-1][1]<=lows[-2][1]: return "INTACT"
         pivot_idx,support=lows[-1]; confirmed_at=pivot_idx+2
-        broken=any(bars[k]["close"]<support for k in range(confirmed_at+1,i+1))
+        broken=any(bars[k]["close"]<support for k in range(confirmed_at,i+1))
     else:
         if len(highs)<2 or highs[-1][1]>=highs[-2][1]: return "INTACT"
         pivot_idx,resistance=highs[-1]; confirmed_at=pivot_idx+2
-        broken=any(bars[k]["close"]>resistance for k in range(confirmed_at+1,i+1))
+        broken=any(bars[k]["close"]>resistance for k in range(confirmed_at,i+1))
     return "BROKEN" if broken else "INTACT"
 
 def dashboard_status(bars,i,trend,prior_high,prior_low):
@@ -190,15 +190,22 @@ def run():
           ("Short LL/LH","SHORT","LL/LH"),("Short HH/HL","SHORT","HH/HL"),("Short Mixed","SHORT","MIXED")]
     print_table("TABLE 1 — PRIOR COMPLETED SESSION RANGE STRUCTURE",
       [(label,[x for x in trades if x["side"]==side and x["trend"]==trend]) for label,side,trend in cats])
-    for key,title in [("2a","TABLE 2A — CONFIRMED INTRADAY SWING PIVOT RULE"),
-                      ("2b","TABLE 2B — DASHBOARD SESSION-EXTREME RULE")]:
-        groups=[]
-        for pattern in ("A","B"):
-            for status in ("INTACT","BROKEN"):
-                groups.append((f"Pattern {pattern} — {status}",[x for x in trades if x["pattern"]==pattern and x[key]==status]))
-        groups.append(("Mixed prior structure — N/A",[x for x in trades if x["trend"]=="MIXED" and x[key]=="N/A"]))
-        print_table(title+" | causal status at entry",groups)
-    print(f"\nCompleted trades: {len(trades)} | Unresolved signals excluded: {unresolved}")
+    print("\\nTABLE 2 — CAUSAL LIVE INTRADAY STRUCTURE AT ENTRY (2A vs 2B SIDE BY SIDE)")
+    print(f"{'Bucket':<27} {'Rule':<5} {'N':>5} {'Win %':>7} {'Avg R':>8} {'Net T/T':>9} {'Net M/T':>9} {'Max DD':>8}")
+    print("-"*86)
+    for pattern in ("A","B"):
+        for status in ("INTACT","BROKEN"):
+            row=[x for x in trades if x["pattern"]==pattern and x["2a"]==status]
+            n,w,a,tt,mt,dd=metrics(row)
+            print(f"{('Pattern '+pattern+' — '+status):<27} {'2A':<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
+            row=[x for x in trades if x["pattern"]==pattern and x["2b"]==status]
+            n,w,a,tt,mt,dd=metrics(row)
+            print(f"{('Pattern '+pattern+' — '+status):<27} {'2B':<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
+    for key in ("2a","2b"):
+        row=[x for x in trades if x["trend"]=="MIXED" and x[key]=="N/A"]
+        n,w,a,tt,mt,dd=metrics(row)
+        print(f"{'Mixed prior structure — N/A':<27} {key.upper():<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
+    print(f"\\nCompleted trades: {len(trades)} | Unresolved signals excluded: {unresolved}")
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
