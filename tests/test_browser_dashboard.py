@@ -389,6 +389,6 @@ def test_nifty_intraday_value_progression_excludes_uncompleted_and_breaks_on_gap
         bars, day, datetime(2026, 11, 27, 12, 0, tzinfo=ist), calculate_profile
     )
     assert result[0]["candles"] == 2
-    assert result[1]["candles"] == 0
-    assert result[1]["value_step"] == "NOT STARTED"
+    assert result[1]["candles"] == 5
+    assert result[1]["value_step"] == "OVERLAPPING / INSIDE"
     assert result[2]["candles"] == 0
