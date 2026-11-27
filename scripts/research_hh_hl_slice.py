@@ -191,20 +191,17 @@ def run():
     print_table("TABLE 1 — PRIOR COMPLETED SESSION RANGE STRUCTURE",
       [(label,[x for x in trades if x["side"]==side and x["trend"]==trend]) for label,side,trend in cats])
     print("\\nTABLE 2 — CAUSAL LIVE INTRADAY STRUCTURE AT ENTRY (2A vs 2B SIDE BY SIDE)")
-    print(f"{'Bucket':<27} {'Rule':<5} {'N':>5} {'Win %':>7} {'Avg R':>8} {'Net T/T':>9} {'Net M/T':>9} {'Max DD':>8}")
-    print("-"*86)
+    print(f"{'Bucket':<25} {'2A N':>5} {'Win%':>6} {'AvgR':>7} {'NetTT':>8} {'NetMT':>8} {'DD':>7} | {'2B N':>5} {'Win%':>6} {'AvgR':>7} {'NetTT':>8} {'NetMT':>8} {'DD':>7}")
+    print("-"*120)
     for pattern in ("A","B"):
         for status in ("INTACT","BROKEN"):
-            row=[x for x in trades if x["pattern"]==pattern and x["2a"]==status]
-            n,w,a,tt,mt,dd=metrics(row)
-            print(f"{('Pattern '+pattern+' — '+status):<27} {'2A':<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
-            row=[x for x in trades if x["pattern"]==pattern and x["2b"]==status]
-            n,w,a,tt,mt,dd=metrics(row)
-            print(f"{('Pattern '+pattern+' — '+status):<27} {'2B':<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
-    for key in ("2a","2b"):
-        row=[x for x in trades if x["trend"]=="MIXED" and x[key]=="N/A"]
-        n,w,a,tt,mt,dd=metrics(row)
-        print(f"{'Mixed prior structure — N/A':<27} {key.upper():<5} {n:>5d} {w:>7.2f} {a:>8.3f} {tt:>9.3f} {mt:>9.3f} {dd:>8.3f}")
+            label=f"Pattern {pattern} — {status}"
+            n1=metrics([x for x in trades if x["pattern"]==pattern and x["2a"]==status])
+            n2=metrics([x for x in trades if x["pattern"]==pattern and x["2b"]==status])
+            print(f"{label:<25} {n1[0]:>5d} {n1[1]:>6.2f} {n1[2]:>7.3f} {n1[3]:>8.3f} {n1[4]:>8.3f} {n1[5]:>7.3f} | {n2[0]:>5d} {n2[1]:>6.2f} {n2[2]:>7.3f} {n2[3]:>8.3f} {n2[4]:>8.3f} {n2[5]:>7.3f}")
+    mixed1=metrics([x for x in trades if x["trend"]=="MIXED" and x["2a"]=="N/A"])
+    mixed2=metrics([x for x in trades if x["trend"]=="MIXED" and x["2b"]=="N/A"])
+    print(f"{'Mixed prior — N/A':<25} {mixed1[0]:>5d} {mixed1[1]:>6.2f} {mixed1[2]:>7.3f} {mixed1[3]:>8.3f} {mixed1[4]:>8.3f} {mixed1[5]:>7.3f} | {mixed2[0]:>5d} {mixed2[1]:>6.2f} {mixed2[2]:>7.3f} {mixed2[3]:>8.3f} {mixed2[4]:>8.3f} {mixed2[5]:>7.3f}")
     print(f"\\nCompleted trades: {len(trades)} | Unresolved signals excluded: {unresolved}")
 
 def main():
