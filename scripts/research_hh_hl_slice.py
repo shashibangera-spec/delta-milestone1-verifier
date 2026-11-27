@@ -83,13 +83,11 @@ def read_candles(c):
             raise ResearchError(f"{ts}: null OHLC")
         out[ts.date()].append({"timestamp":ts,"open":float(r["open_value"]),
           "high":float(r["high_value"]),"low":float(r["low_value"]),"close":float(r["close_value"])})
-    # Warm-up/context dates support the first in-scope session's prior-range
-    # classification and previous-close input. They are not research sessions
-    # and deliberately have no 48-bar completeness requirement.
-    context_days={START-timedelta(days=2), START-timedelta(days=1), date(2026,11,20)}
-    for d in sorted(context_days):
-        if not out.get(d):
-            raise ResearchError(f"{d}: source PRICE context is missing")
+    # Pre-window warm-up dates are optional context only. If either is absent,
+    # the first in-scope session is classified MIXED and any unavailable
+    # prior-session comparison is reported as N/A; the research run continues.
+    # The excluded 20 Nov candle rows, if present, remain available only as
+    # forward exit data and are not required for sample inclusion.
 
     # Enforce exact 48-bar completeness only on the 189 approved sessions.
     approved_days=[START+timedelta(days=i) for i in range((END-START).days+1)
@@ -103,7 +101,8 @@ def read_candles(c):
     return dict(out)
 
 def prior_structure(d,ranges):
-    a=ranges[d-timedelta(days=1)]; b=ranges[d-timedelta(days=2)]
+    a=ranges.get(d-timedelta(days=1)); b=ranges.get(d-timedelta(days=2))
+    if a is None or b is None: return "MIXED"
     if a["high"]>b["high"] and a["low"]>b["low"]: return "HH/HL"
     if a["high"]<b["high"] and a["low"]<b["low"]: return "LL/LH"
     return "MIXED"
@@ -132,7 +131,7 @@ def pivot_status(bars,i,trend):
 
 def dashboard_status(bars,i,trend,prior_high,prior_low):
     """2B: strictly pre-entry candle extremes against prior completed session range."""
-    if trend not in ("HH/HL","LL/LH"): return "N/A"
+    if trend not in ("HH/HL","LL/LH") or prior_high is None or prior_low is None: return "N/A"
     earlier=bars[:i]
     if trend=="HH/HL": return "BROKEN" if any(x["low"]<prior_low for x in earlier) else "INTACT"
     return "BROKEN" if any(x["high"]>prior_high for x in earlier) else "INTACT"
@@ -179,9 +178,16 @@ def run():
     trades=[]; unresolved=0
     for d,p in sorted(profiles.items()):
         bars=candles[d]; trend=prior_structure(d,ranges)
-        prior_high=ranges[d-timedelta(days=1)]["high"]; prior_low=ranges[d-timedelta(days=1)]["low"]
+        prior_range=ranges.get(d-timedelta(days=1))
+        prior_high=prior_range["high"] if prior_range else None
+        prior_low=prior_range["low"] if prior_range else None
         for i,cur in enumerate(bars):
-            prev=bars[i-1] if i else {"close":candles[d-timedelta(days=1)][-1]["close"]}
+            if i:
+                prev=bars[i-1]
+            else:
+                prior_bars=candles.get(d-timedelta(days=1),[])
+                if not prior_bars: continue  # no causal previous candle for first bar
+                prev={"close":prior_bars[-1]["close"]}
             sig=build_signal(prev,cur,p["vah"],p["val"])
             if sig is None: continue
             outcome=None
