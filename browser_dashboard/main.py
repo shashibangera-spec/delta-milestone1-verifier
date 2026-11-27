@@ -525,7 +525,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
  </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div><div class="sub structure-status amber" id="btc-prior-structure-status">PRIOR STRUCTURE UNAVAILABLE</div>
  <div class="sub">Range development only; factual comparison of completed 30m candles, no directional prediction</div>
 </section>
-<section class="panel section"><h2>Playbook V1.4 — active and recent shadow trades</h2>
+<section class="panel section"><h2>Playbook v1.4 · SHADOW_V1_4 — active and recent shadow trades</h2>
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 </section>
 <footer>Research-only. No order routing, alerts, or execution. Developing values show persisted candle-by-candle V1.7 snapshots; live price and causal state use the latest available completed source candles. Refreshes every 10 seconds.</footer>
