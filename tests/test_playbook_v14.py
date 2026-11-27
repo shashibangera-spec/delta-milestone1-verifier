@@ -9,15 +9,15 @@ def candle(open_, high, low, close):
 
 
 def test_pattern_a_long_uses_five_percent_prior_value_width_and_two_r_target():
-    s=build_signal(candle(1500,1550,1490,1500),candle(1500,1550,1350,1500),2000,1000)
+    s=build_signal(candle(1150,1200,1100,1150),candle(1150,1200,1000,1150),2000,1000)
     assert s is not None and (s.pattern,s.side)==("A","LONG")
-    assert s.buffer_points==50.0 and s.stop_price==1300.0
-    assert s.risk_points==200.0 and s.target_price==1900.0
+    assert s.buffer_points==50.0 and s.stop_price==950.0
+    assert s.risk_points==200.0 and s.target_price==1550.0
 
 
 def test_minimum_stop_width_rejects_199_and_accepts_200():
-    accepted=build_signal(candle(1500,1550,1490,1500),candle(1500,1550,1351,1500),2000,1000)
-    exact=build_signal(candle(1500,1550,1490,1500),candle(1500,1550,1350,1500),2000,1000)
+    accepted=build_signal(candle(1149,1200,1100,1149),candle(1149,1200,1000,1149),2000,1000)
+    exact=build_signal(candle(1150,1200,1100,1150),candle(1150,1200,1000,1150),2000,1000)
     assert accepted is None
     assert exact is not None and exact.risk_points==200.0
 
@@ -27,7 +27,7 @@ def test_pattern_b_is_disabled_even_when_old_v13_pattern_b_would_trigger():
 
 
 def test_pattern_a_short_and_upper_side_priority_are_preserved():
-    s=build_signal(candle(1500,1550,1490,1500),candle(1500,2650,1350,1500),2000,1000)
+    s=build_signal(candle(1500,1550,1490,1500),candle(1500,2650,950,1500),2000,1000)
     assert s is not None and (s.pattern,s.side)==("A","SHORT")
 
 
@@ -42,10 +42,10 @@ def test_subsession_half_open_utc_boundaries():
 
 
 def test_exit_remains_stop_first_and_target_two_r():
-    t={"side":"LONG","stop_price":1300,"target_price":1900,"risk_points":200}
-    assert evaluate_exit(t,candle(1500,1950,1250,1600))=={
+    t={"side":"LONG","stop_price":950,"target_price":1550,"risk_points":200}
+    assert evaluate_exit(t,candle(1500,1950,900,1200))=={
         "exit_reason":"STOP_FIRST_AMBIGUOUS","exit_price":1300.0,"realized_r":-1.0}
-    assert evaluate_exit(t,candle(1500,1950,1400,1800))=={
+    assert evaluate_exit(t,candle(1500,1600,1000,1500))=={
         "exit_reason":"TARGET_2R","exit_price":1900.0,"realized_r":2.0}
 
 
