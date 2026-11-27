@@ -77,9 +77,9 @@ def classify_discovery(closes: Iterable[float], vah_upper: float, val_lower: flo
 def build_signal(previous: dict, current: dict, vah_upper: float, val_lower: float) -> Signal | None:
     """Evaluate only a completed current candle; entry is its close.
 
-    Pattern A: previous close was inside prior value; current wick tests a
-    boundary and current close reclaims back inside value.
-        Pattern B is disabled. If both boundaries are wicked, upper-side (SHORT) wins.
+    Pattern A only: previous close was inside prior value; current wick tests
+    a boundary and current close reclaims back inside value. Pattern B is
+    disabled. If both boundaries are wicked, upper-side (SHORT) wins.
     """
     vals = [_num(previous.get("close")), _num(current.get("open")),
             _num(current.get("high")), _num(current.get("low")),
