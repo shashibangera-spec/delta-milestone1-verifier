@@ -5,6 +5,7 @@ import argparse
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 import psycopg
