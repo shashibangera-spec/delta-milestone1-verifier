@@ -5,10 +5,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "daily current session or validated 54-session initial backfill"
+        description: "validate Yahoo history only, persist daily close, or run validated 54-session initial backfill"
         required: true
         type: choice
-        options: [daily, backfill]
+        options: [validate, daily, backfill]
         default: daily
 permissions:
   contents: read
