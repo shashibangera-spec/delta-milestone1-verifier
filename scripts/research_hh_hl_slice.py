@@ -106,12 +106,14 @@ def pivot_status(bars,i,trend):
         if all(known[j]["high"]>known[k]["high"] for k in (j-2,j-1,j+1,j+2)):
             highs.append((j,known[j]["high"]))
     if trend=="HH/HL":
-        if len(lows)<2 or lows[-1][1]<=lows[-2][1]: return "INTACT"
-        pivot_idx,support=lows[-1]; confirmed_at=pivot_idx+2
+        higher_lows=[(cur_idx,cur_val) for (_,prev_val),(cur_idx,cur_val) in zip(lows,lows[1:]) if cur_val>prev_val]
+        if not higher_lows: return "INTACT"
+        pivot_idx,support=higher_lows[-1]; confirmed_at=pivot_idx+2
         broken=any(bars[k]["close"]<support for k in range(confirmed_at,i+1))
     else:
-        if len(highs)<2 or highs[-1][1]>=highs[-2][1]: return "INTACT"
-        pivot_idx,resistance=highs[-1]; confirmed_at=pivot_idx+2
+        lower_highs=[(cur_idx,cur_val) for (_,prev_val),(cur_idx,cur_val) in zip(highs,highs[1:]) if cur_val<prev_val]
+        if not lower_highs: return "INTACT"
+        pivot_idx,resistance=lower_highs[-1]; confirmed_at=pivot_idx+2
         broken=any(bars[k]["close"]>resistance for k in range(confirmed_at,i+1))
     return "BROKEN" if broken else "INTACT"
 
