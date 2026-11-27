@@ -432,7 +432,7 @@ def index(_username: str = Depends(require_dashboard_auth)):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "btc-v17-v13-dashboard"}
+    return {"status": "ok", "service": "btc-v17-v14-dashboard"}
 
 
 @app.get("/api/overview")
