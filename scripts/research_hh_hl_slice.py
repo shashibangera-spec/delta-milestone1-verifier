@@ -186,11 +186,12 @@ def run():
     print("Signals are evaluated independently with exact V1.3 build_signal/evaluate_exit; stop-first ambiguity retained.")
     print("No time-based exit is invented: unresolved trades are excluded from completed-trade metrics.")
     print("Max DD uses chronological cumulative Taker/Taker + GST net R.")
+    print("2A: without two confirmed swing lows/highs establishing HL/LH, status remains INTACT until a confirmed break.")
     cats=[("Long HH/HL","LONG","HH/HL"),("Long LL/LH","LONG","LL/LH"),("Long Mixed","LONG","MIXED"),
           ("Short LL/LH","SHORT","LL/LH"),("Short HH/HL","SHORT","HH/HL"),("Short Mixed","SHORT","MIXED")]
     print_table("TABLE 1 — PRIOR COMPLETED SESSION RANGE STRUCTURE",
       [(label,[x for x in trades if x["side"]==side and x["trend"]==trend]) for label,side,trend in cats])
-    print("\\nTABLE 2 — CAUSAL LIVE INTRADAY STRUCTURE AT ENTRY (2A vs 2B SIDE BY SIDE)")
+    print("\nTABLE 2 — CAUSAL LIVE INTRADAY STRUCTURE AT ENTRY (2A vs 2B SIDE BY SIDE)")
     print(f"{'Bucket':<25} {'2A N':>5} {'Win%':>6} {'AvgR':>7} {'NetTT':>8} {'NetMT':>8} {'DD':>7} | {'2B N':>5} {'Win%':>6} {'AvgR':>7} {'NetTT':>8} {'NetMT':>8} {'DD':>7}")
     print("-"*120)
     for pattern in ("A","B"):
@@ -202,7 +203,7 @@ def run():
     mixed1=metrics([x for x in trades if x["trend"]=="MIXED" and x["2a"]=="N/A"])
     mixed2=metrics([x for x in trades if x["trend"]=="MIXED" and x["2b"]=="N/A"])
     print(f"{'Mixed prior — N/A':<25} {mixed1[0]:>5d} {mixed1[1]:>6.2f} {mixed1[2]:>7.3f} {mixed1[3]:>8.3f} {mixed1[4]:>8.3f} {mixed1[5]:>7.3f} | {mixed2[0]:>5d} {mixed2[1]:>6.2f} {mixed2[2]:>7.3f} {mixed2[3]:>8.3f} {mixed2[4]:>8.3f} {mixed2[5]:>7.3f}")
-    print(f"\\nCompleted trades: {len(trades)} | Unresolved signals excluded: {unresolved}")
+    print(f"\nCompleted trades: {len(trades)} | Unresolved signals excluded: {unresolved}")
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
