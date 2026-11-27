@@ -133,6 +133,10 @@ def persist_session(conn,frame,day,prior):
   q.execute("SELECT source_sha256,profile_sha256,is_complete,observed_brackets FROM amt_nifty_v17.sessions WHERE session_date=%s",(day,)); check=q.fetchone()
   if not check or check["source_sha256"]!=src_sha or check["profile_sha256"]!=prof_sha or not check["is_complete"] or check["observed_brackets"]!=13: raise RuntimeError(f"{day}: post-write SHA/integrity check failed")
  return {"date":day.isoformat(),"status":"INSERTED","sha256":prof_sha}
+def run_validate():
+ frame=fetch_yahoo("55d",datetime.now(IST))
+ validation=validate_54_sessions(frame)
+ return {k:v for k,v in validation.items() if k!="sessions"}
 def run_backfill():
  frame=fetch_yahoo("55d",datetime.now(IST)); validation=validate_54_sessions(frame) # no connection/write until all 54 pass
  with connect_writer() as conn:
@@ -153,6 +157,7 @@ def run_daily():
    result=persist_session(conn,frame,day,prior)
  return {"status":"SUCCESS","session":day.isoformat(),"result":result}
 def main():
- p=argparse.ArgumentParser(); p.add_argument("mode",choices=("backfill","daily")); a=p.parse_args()
- print(json.dumps(run_backfill() if a.mode=="backfill" else run_daily(),sort_keys=True,default=str))
+ p=argparse.ArgumentParser(); p.add_argument("mode",choices=("validate","backfill","daily")); a=p.parse_args()
+ result=run_validate() if a.mode=="validate" else (run_backfill() if a.mode=="backfill" else run_daily())
+ print(json.dumps(result,sort_keys=True,default=str))
 if __name__=="__main__": main()
