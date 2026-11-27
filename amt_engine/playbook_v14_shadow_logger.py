@@ -74,11 +74,13 @@ def _is_contiguous_30m(previous_candle, candle_open):
 
 def _load_state(conn):
     with conn.cursor() as cur:
-        cur.execute("""SELECT shadow_started_at,last_processed_candle_open,starting_realized_r
+        cur.execute("""SELECT strategy_version,shadow_started_at,last_processed_candle_open,starting_realized_r
                        FROM amt_engine_v17.playbook_v14_shadow_state WHERE singleton=true""")
         row = cur.fetchone()
     if not row:
         raise ShadowLoggerError("Playbook v1.4 shadow state is not initialized; apply its migration first")
+    if row["strategy_version"] != "BTC_PLAYBOOK_V1.4":
+        raise ShadowLoggerError("Playbook v1.4 shadow state version mismatch")
     if float(row["starting_realized_r"]) != 0.0:
         raise ShadowLoggerError("Shadow ledger must start at exactly 0.0R")
     return row
