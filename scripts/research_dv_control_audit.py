@@ -249,7 +249,7 @@ def test_dv(bars,dv):
             if tr:
                 tr["match_key"]=key; controls.append(tr)
 
-    print("\\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
+    print("\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
     print("Events: first outside close per excursion; continuation enters that close; reclaim enters first later close inside contemporaneous developing value; stop at excursion extreme.")
     print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and nearest whole-dollar stop-distance; 2R; stop-first.")
     for w in ("Asia + Europe","US Cash"):
@@ -270,8 +270,16 @@ def self_test():
     x=evaluate_exit({"side":"LONG","stop_price":95,"target_price":110},{"high":111,"low":94,"close":100})
     assert x and x["realized_r"]==-1 and x["exit_reason"]=="STOP_FIRST_AMBIGUOUS"
     assert metrics([])[0]==0
-    # 2A pivot confirmation is unavailable until both right-hand candles have closed.
-    assert status_2a([{"low":i,"high":i+1,"close":i} for i in range(8)],7,"MIXED")=="N/A"
+    # Exact V1.3 Pattern A: completed upper rejection/reclaim.
+    sig=build_signal({"close":100.0},{"open":100.0,"high":112.0,"low":95.0,"close":105.0},110.0,90.0)
+    assert sig is not None and sig.pattern=="A" and sig.side=="SHORT" and sig.entry_price==105.0
+    # 2A: higher-low pivot is not available until two right bars close;
+    # a later completed close below its support marks the structure broken.
+    lows=[10,9,5,8,9,6,8,9,10]
+    piv=[{"low":v,"high":v+20,"close":v+10} for v in lows]
+    assert status_2a(piv,7,"HH/HL")=="INTACT"
+    piv[7]["close"]=4.0
+    assert status_2a(piv,8,"HH/HL")=="BROKEN"
     print("OFFLINE DV CONTROL AUDIT SELF-TEST PASS")
 
 def run():
