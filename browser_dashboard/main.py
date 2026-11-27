@@ -224,6 +224,117 @@ def _calculate_v17_developing_profile(rows, session_start, now):
     return result
 
 
+
+def _calculate_subsession_value_progression(rows, session_date, now):
+    """Build read-only $50 / 70% TPO profiles for today's UTC sub-sessions.
+
+    Uses only already-loaded, completed 30m candles. POC is the midpoint of
+    the selected $50 TPO row; VAL/VAH are its lower/upper row boundaries.
+    """
+    from decimal import ROUND_FLOOR, ROUND_CEILING
+
+    now = now.astimezone(timezone.utc)
+    session_start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
+    windows = [
+        ("Asia (00:00–08:00 UTC / 05:30–13:30 IST)", 0, 8),
+        ("Europe (08:00–13:30 UTC / 13:30–19:00 IST)", 8, 13.5),
+        ("US Cash (13:30–00:00 UTC / 19:00–05:30 IST)", 13.5, 24),
+    ]
+    result = []
+    previous_completed_profile = None
+
+    for label, start_hour, end_hour in windows:
+        start = session_start + timedelta(hours=start_hour)
+        end = session_start + timedelta(hours=end_hour)
+        candles = []
+        for row in sorted(rows, key=lambda item: item["candle_time"]):
+            candle_open = row["candle_time"].astimezone(timezone.utc)
+            candle_close = candle_open + timedelta(minutes=30)
+            if start <= candle_open < end and candle_close <= now:
+                candles.append(row)
+
+        profile = None
+        if candles:
+            counts = {}
+            for candle in candles:
+                low = Decimal(str(candle["low_value"]))
+                high = Decimal(str(candle["high_value"]))
+                if not low.is_finite() or not high.is_finite() or low < 0 or high < low:
+                    counts = {}
+                    candles = []
+                    break
+                low_idx = int((low / Decimal(50)).to_integral_value(rounding=ROUND_FLOOR))
+                high_idx = int((high / Decimal(50)).to_integral_value(rounding=ROUND_FLOOR))
+                for row_index in range(low_idx, high_idx + 1):
+                    counts[row_index] = counts.get(row_index, 0) + 1
+
+            if counts:
+                min_index, max_index = min(counts), max(counts)
+                dense = {idx: counts.get(idx, 0) for idx in range(min_index, max_index + 1)}
+                total_tpos = sum(dense.values())
+                target_tpos = int(
+                    (Decimal(total_tpos) * Decimal("0.70")).to_integral_value(rounding=ROUND_CEILING)
+                )
+                max_count = max(dense.values())
+                poc_index = min(idx for idx, count in dense.items() if count == max_count)
+                lo_index = hi_index = poc_index
+                covered = dense[poc_index]
+                while covered < target_tpos and (lo_index > min_index or hi_index < max_index):
+                    left_count = dense.get(lo_index - 1, 0)
+                    right_count = dense.get(hi_index + 1, 0)
+                    if lo_index == min_index:
+                        choose_left = False
+                    elif hi_index == max_index:
+                        choose_left = True
+                    else:
+                        choose_left = left_count >= right_count
+                    if choose_left:
+                        lo_index -= 1
+                        covered += left_count
+                    else:
+                        hi_index += 1
+                        covered += right_count
+                profile = {
+                    "val": Decimal(lo_index * 50),
+                    "poc": Decimal(poc_index * 50 + 25),
+                    "vah": Decimal((hi_index + 1) * 50),
+                }
+
+        value_step = "INITIAL"
+        if profile is not None and previous_completed_profile is not None:
+            current_levels = (profile["val"], profile["poc"], profile["vah"])
+            previous_levels = (
+                previous_completed_profile["val"],
+                previous_completed_profile["poc"],
+                previous_completed_profile["vah"],
+            )
+            if all(current > previous for current, previous in zip(current_levels, previous_levels)):
+                value_step = "VALUE STEPPED UP"
+            elif all(current < previous for current, previous in zip(current_levels, previous_levels)):
+                value_step = "VALUE STEPPED DOWN"
+            else:
+                value_step = "OVERLAPPING / INSIDE"
+
+        result.append({
+            "sub_session": label,
+            "candles": len(candles),
+            "open": Decimal(str(candles[0]["open_value"])) if candles else None,
+            "high": max((Decimal(str(row["high_value"])) for row in candles), default=None),
+            "low": min((Decimal(str(row["low_value"])) for row in candles), default=None),
+            "close": Decimal(str(candles[-1]["close_value"])) if candles else None,
+            "val": profile["val"] if profile else None,
+            "poc": profile["poc"] if profile else None,
+            "vah": profile["vah"] if profile else None,
+            "value_step": value_step,
+        })
+
+        # Only completed windows become the comparison baseline for the next row.
+        if now >= end and profile is not None:
+            previous_completed_profile = profile
+
+    return result
+
+
 def load_overview():
     now = datetime.now(timezone.utc)
     session_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -355,6 +466,9 @@ def load_overview():
         "profile": profile,
         "prior_profile": prior_profile,
         "developing": live_developing,
+        "subsession_value_progression": _calculate_subsession_value_progression(
+            current_session_rows, session_start.date(), now
+        ),
         "auction_context": auction_context,
         "live": {
             "price": latest_price_rows[-1] if latest_price_rows else None,
@@ -522,7 +636,10 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
   <div class="level"><small>Asia · 00:00–08:00</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>Europe · 08:00–13:30</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>US · 13:30–00:00</small><b>—</b><div class="sub">Range / extension</div></div>
- </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div><div class="sub structure-status amber" id="btc-prior-structure-status">PRIOR STRUCTURE UNAVAILABLE</div>
+ </div>
+ <h3>SUB-SESSION VALUE PROGRESSION (UTC / IST)</h3>
+ <div class="scroll"><table><thead><tr><th>Sub-Session</th><th>Candles</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>VAL</th><th>POC</th><th>VAH</th><th>Value Step</th></tr></thead><tbody id="subsession-value-progression"><tr><td colspan="10">Loading today’s completed candles…</td></tr></tbody></table></div>
+ <div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div><div class="sub structure-status amber" id="btc-prior-structure-status">PRIOR STRUCTURE UNAVAILABLE</div>
  <div class="sub">Range development only; factual comparison of completed 30m candles, no directional prediction</div>
 </section>
 <section class="panel section"><h2>Playbook v1.4 · SHADOW_V1_4 — active and recent shadow trades</h2>
@@ -603,6 +720,10 @@ async function refresh(){
   const label=['Asia · 00:00–08:00','Europe · 08:00–13:30','US · 13:30–00:00'][i];
   return '<div class="level"><small>'+label+' UTC</small><b>'+range+'</b><div class="sub">'+(s.development||'Unavailable')+'</div></div>';
  }).join('');
+ const progression=d.subsession_value_progression||[];
+ document.getElementById('subsession-value-progression').innerHTML=progression.map(s=>
+  '<tr><td>'+s.sub_session+'</td><td>'+s.candles+'</td><td>'+fmt(s.open)+'</td><td>'+fmt(s.high)+'</td><td>'+fmt(s.low)+'</td><td>'+fmt(s.close)+'</td><td>'+fmt(s.val)+'</td><td>'+fmt(s.poc)+'</td><td>'+fmt(s.vah)+'</td><td>'+s.value_step+'</td></tr>'
+ ).join('')||'<tr><td colspan="10">No completed candles available for today</td></tr>';
  const trades=sh.trades||[];const open=trades.filter(t=>t.status==='OPEN').length;const total=trades.filter(t=>t.realized_r!==null).reduce((a,t)=>a+Number(t.realized_r),0);
  const totals=sh.totals||{};document.getElementById('shadow-r').textContent=Number(totals.realized_r||0).toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+(totals.open_trades||0)+' open · '+(totals.total_trades||0)+' total trades';
  document.getElementById('trades').innerHTML=trades.length?trades.map(t=>'<tr><td>'+t.session_date+'</td><td>'+t.pattern+'</td><td>'+t.side+'</td><td>'+t.status+'</td><td>'+fmt(t.entry_price)+'</td><td>'+fmt(t.stop_price)+'</td><td>'+fmt(t.target_price)+'</td><td>'+t.discovery_state+'</td><td>'+t.oi_class+'</td><td>'+ (t.exit_reason||'—')+'</td><td>'+ (t.realized_r===null?'—':Number(t.realized_r).toFixed(2)+'R')+'</td></tr>').join(''):'<tr><td colspan="11">No shadow trades logged yet</td></tr>';
