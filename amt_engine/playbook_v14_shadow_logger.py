@@ -133,7 +133,10 @@ def _open_trade(conn):
 
 
 def _count_open_events(conn, session_date, sub_session):
-    """Count durable OPEN events for this UTC session/sub-session, including exited trades."""
+    """Count durable OPEN events for this UTC session/sub-session, including exited trades.
+
+    The event log is append-only: an EXIT changes trade status but never releases this cap.
+    """
     if sub_session == "Asia":
         start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
         end = start + timedelta(hours=8)
