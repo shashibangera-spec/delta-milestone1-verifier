@@ -82,6 +82,33 @@ def build_prior_auction_context(completed_profiles, completed_candles, developin
     prior_high = sessions[-1]["range"]["high"] if sessions and sessions[-1]["range"] else None
     prior_low = sessions[-1]["range"]["low"] if sessions and sessions[-1]["range"] else None
     rows = sorted(developing_candles, key=lambda r: r["candle_time"])
+
+    # Live, descriptive comparison: completed current-session 30m range vs latest
+    # completed auction range. No projection or inference is performed.
+    live_highs = [float(r["high_value"]) for r in rows if r.get("high_value") is not None]
+    live_lows = [float(r["low_value"]) for r in rows if r.get("low_value") is not None]
+    live_swing = {"label": "Unavailable", "current_range": None, "prior_range": None,
+                  "completed_candles": len(rows)}
+    if live_highs and live_lows and prior_high is not None and prior_low is not None:
+        current_high, current_low = max(live_highs), min(live_lows)
+        hh, hl = current_high > prior_high, current_low > prior_low
+        ll, lh = current_low < prior_low, current_high < prior_high
+        if hh and ll:
+            label = "HH / LL (Outside)"
+        elif hh and hl:
+            label = "HH / HL"
+        elif ll and lh:
+            label = "LL / LH"
+        elif current_high <= prior_high and current_low >= prior_low:
+            label = "LH / HL (Inside)"
+        else:
+            label = "Mixed"
+        live_swing = {
+            "label": label,
+            "current_range": {"low": current_low, "high": current_high},
+            "prior_range": {"low": prior_low, "high": prior_high},
+            "completed_candles": len(rows),
+        }
     for name, start, end in definitions:
         selected = [r for r in rows if start <= _utc(r["candle_time"]).time().replace(tzinfo=None) < end]
         value = _range(selected)
@@ -101,6 +128,7 @@ def build_prior_auction_context(completed_profiles, completed_candles, developin
         "close_location": close_location,
         "value_migration": migration,
         "swing_structure": swing,
+        "live_intraday_swing": live_swing,
         "subsessions": subsessions,
         "informational_only": True,
     }
