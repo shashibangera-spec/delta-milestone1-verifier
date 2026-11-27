@@ -36,6 +36,8 @@ jobs:
           pip install -r requirements.txt
           pip install -r browser_dashboard/requirements.txt
           python -m pip install pytest==8.3.4
+      - name: Compile v1.4 engine, logger, and dashboard
+        run: python -m compileall -q amt_engine/playbook_v14.py amt_engine/playbook_v14_shadow_logger.py browser_dashboard/main.py tests/test_playbook_v14.py
       - name: Run offline unit tests
         run: python -m unittest discover -s tests -v
       - name: Run full offline AMT, Playbook, writer, and dashboard regression suite
