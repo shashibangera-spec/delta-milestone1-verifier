@@ -165,7 +165,11 @@ def replay_pattern_a(sessions: list[dict]) -> list[dict]:
             trade = {
                 "date": day.isoformat(), "window": window, "side": signal.side,
                 "entry": signal.entry_price, "stop": signal.stop_price,
-                "target": signal.target_price, "risk_points": signal.risk_points,
+                "target": signal.target_price,
+                # evaluate_exit consumes the canonical Playbook trade keys.
+                "stop_price": signal.stop_price,
+                "target_price": signal.target_price,
+                "risk_points": signal.risk_points,
                 "entry_bracket": i + 1, "entry_time": entry_close.isoformat(),
             }
             exit_result = None
