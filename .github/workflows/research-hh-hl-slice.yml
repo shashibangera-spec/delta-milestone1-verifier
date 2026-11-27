@@ -1,0 +1,46 @@
+name: Research HH-HL Slice
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-hh-hl-slice
+  cancel-in-progress: false
+
+jobs:
+  offline-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project requirements
+        run: python -m pip install -r requirements.txt
+      - name: Compile and run offline self-tests
+        run: |
+          python -m compileall -q amt_engine scripts/research_hh_hl_slice.py
+          python scripts/research_hh_hl_slice.py --self-test
+
+  research:
+    needs: offline-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project requirements
+        run: python -m pip install -r requirements.txt
+      - name: Run read-only research
+        env:
+          V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          V17_SOURCE_DATABASE_URL: ${{ secrets.SOURCE_DATABASE_URL }}
+        run: python scripts/research_hh_hl_slice.py
