@@ -484,6 +484,83 @@ def load_overview():
     })
 
 
+
+
+def _calculate_nifty_intraday_value_progression(bars, session_date, now, profile_calculator):
+    """Build three read-only 10-point / 70% TPO profiles from loaded NSE brackets.
+
+    Only completed, contiguous 30m brackets are included. The caller supplies
+    the already-loaded bars and the frozen NIFTY V1.7 profile calculator;
+    this helper performs no I/O and issues no database queries.
+    """
+    from zoneinfo import ZoneInfo
+
+    ist = ZoneInfo("Asia/Kolkata")
+    now = now.astimezone(ist)
+    windows = [
+        ("Morning Open / IB (09:15–11:15 IST · Brackets 1–4)", 1, 4),
+        ("Midday Session (11:15–13:45 IST · Brackets 5–9)", 5, 9),
+        ("Afternoon Close (13:45–15:30 IST · Brackets 10–13)", 10, 13),
+    ]
+    ordered = sorted(bars, key=lambda item: int(item["bracket"]))
+    result = []
+    previous_completed_profile = None
+
+    for label, first_bracket, last_bracket in windows:
+        selected = []
+        expected = first_bracket
+        for bar in ordered:
+            bracket = int(bar["bracket"])
+            if bracket < first_bracket or bracket > last_bracket:
+                continue
+            if bracket != expected:
+                break
+            candle_start = datetime.combine(
+                session_date, datetime.min.time(), tzinfo=ist
+            ) + timedelta(minutes=15 + 30 * (bracket - 1))
+            if candle_start + timedelta(minutes=30) > now:
+                break
+            selected.append(bar)
+            expected += 1
+
+        profile = profile_calculator(selected) if selected else None
+        value_step = "INITIAL" if first_bracket == 1 else "NOT STARTED"
+        if profile is not None and first_bracket > 1 and previous_completed_profile is not None:
+            current_levels = (profile["val"], profile["poc"], profile["vah"])
+            previous_levels = (
+                previous_completed_profile["val"],
+                previous_completed_profile["poc"],
+                previous_completed_profile["vah"],
+            )
+            if all(current > previous for current, previous in zip(current_levels, previous_levels)):
+                value_step = "VALUE STEPPED UP"
+            elif all(current < previous for current, previous in zip(current_levels, previous_levels)):
+                value_step = "VALUE STEPPED DOWN"
+            else:
+                value_step = "OVERLAPPING / INSIDE"
+
+        result.append({
+            "session": label,
+            "candles": len(selected),
+            "open": selected[0]["open"] if selected else None,
+            "high": max((bar["high"] for bar in selected), default=None),
+            "low": min((bar["low"] for bar in selected), default=None),
+            "close": selected[-1]["close"] if selected else None,
+            "val": profile["val"] if profile else None,
+            "poc": profile["poc"] if profile else None,
+            "vah": profile["vah"] if profile else None,
+            "value_step": value_step,
+        })
+
+        window_end = datetime.combine(
+            session_date, datetime.min.time(), tzinfo=ist
+        ) + timedelta(minutes=15 + 30 * last_bracket)
+        if now >= window_end and profile is not None:
+            previous_completed_profile = profile
+
+    return result
+
+
 def load_nifty_overview():
     from amt_engine.nifty_v17 import fetch_yahoo, aggregate_session, calculate_profile
     from zoneinfo import ZoneInfo
@@ -534,6 +611,9 @@ def load_nifty_overview():
         "dvah":developing["vah"],"dpoc":developing["poc"],"dval":developing["val"],"status":"READY"},
         "progress":f"{len(prefix)}/13","diagnostics":diagnostics,
         "current_range":current_range,"prior_range":prior_range,
+        "intraday_value_progression":_calculate_nifty_intraday_value_progression(
+            bars, day, local_now, calculate_profile
+        ),
         "live_intraday_swing":nifty_live_swing})
 
 
@@ -604,6 +684,10 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
 <section class="panel section"><h2>Prior Completed Session · VAH / POC / VAL</h2><div class="levels"><div class="level"><small>VAH</small><b id="nifty-vah">—</b></div><div class="level"><small>POC</small><b id="nifty-poc">—</b></div><div class="level"><small>VAL</small><b id="nifty-val">—</b></div></div></section>
 <section class="panel section"><h2>Live Developing Value · <span id="nifty-progress">0/13</span> completed brackets</h2><div class="levels"><div class="level"><small>dVAH</small><b id="nifty-dvah">—</b></div><div class="level"><small>dPOC</small><b id="nifty-dpoc">—</b></div><div class="level"><div><small>dVAL</small><b id="nifty-dval">—</b></div></div></div><div class="sub" id="nifty-developing-status">Completed 15m Yahoo candles only.</div></section>
 <section class="panel section"><h2>Live Intraday Range vs. Prior Day</h2><div class="levels"><div class="level"><small>Current High</small><b id="nifty-current-high">—</b></div><div class="level"><small>Current Low</small><b id="nifty-current-low">—</b></div><div class="level"><small>Prior Range</small><b id="nifty-prior-range">—</b></div></div><div class="sub" id="nifty-range-status">Read-only completed 15m Yahoo range comparison.</div><div class="sub" id="nifty-range-classification">Live range structure: —</div><div class="sub structure-status" id="nifty-prior-structure-status">Prior structure: —</div></section>
+<section class="panel section"><h2>NSE INTRADAY VALUE PROGRESSION (IST)</h2>
+<div class="scroll"><table><thead><tr><th>Session</th><th>Candles</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>VAL</th><th>POC</th><th>VAH</th><th>Value Step</th></tr></thead>
+<tbody id="nifty-intraday-value-progression"><tr><td colspan="10">Loading completed NSE brackets…</td></tr></tbody></table></div>
+<div class="sub">Read-only profiles from the already-loaded completed 30m NSE brackets · 10-point TPO rows · 70% Value Area.</div></section>
 <footer>NIFTY 50 Spot · Yahoo Finance ^NSEI · 10-point TPO rows · 70% value area · 09:15–15:30 IST. No OI or BTC data dependency.</footer>
 </section>
 <div id="btc-view">
@@ -683,6 +767,10 @@ async function refreshNifty(){
  document.getElementById('nifty-range-classification').textContent='LIVE RANGE STRUCTURE · '+(ns.label||'Unavailable');
  document.getElementById('nifty-prior-structure-status').textContent=(nps.label||'PRIOR STRUCTURE UNAVAILABLE')+(ni.price_name?' · '+ni.price_name+' '+fmt(ni.price)+' · '+ni.value_name+' '+fmt(ni.value):'');
  document.getElementById('nifty-prior-structure-status').className='sub structure-status '+(nps.status==='BROKEN'?'red':nps.status==='INTACT'?'green':'amber');
+ const progression=d.intraday_value_progression||[];
+ document.getElementById('nifty-intraday-value-progression').innerHTML=progression.map(s=>
+  '<tr><td>'+s.session+'</td><td>'+s.candles+'</td><td>'+fmt(s.open)+'</td><td>'+fmt(s.high)+'</td><td>'+fmt(s.low)+'</td><td>'+fmt(s.close)+'</td><td>'+fmt(s.val)+'</td><td>'+fmt(s.poc)+'</td><td>'+fmt(s.vah)+'</td><td>'+s.value_step+'</td></tr>'
+ ).join('')||'<tr><td colspan="10">No completed NSE brackets available</td></tr>';
 }
 
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
