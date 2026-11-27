@@ -68,12 +68,6 @@ def load_completed_profiles(database_url: str) -> list[dict]:
                      AND is_complete = TRUE
                    ORDER BY session_date"""
             ).fetchall()
-            names = [d.name for d in conn.execute(
-                """SELECT column_name FROM information_schema.columns
-                   WHERE table_schema='amt_nifty_v17' AND table_name='sessions'
-                   ORDER BY ordinal_position"""
-            ).description] if False else None
-            # Dict rows are avoided to keep the driver contract explicit.
             columns = ("session_date", "symbol", "method_version", "row_size",
                        "value_area_fraction", "expected_brackets", "observed_brackets",
                        "is_complete", "vah", "poc", "val")
