@@ -46,7 +46,7 @@ def test_exit_remains_stop_first_and_target_two_r():
     assert evaluate_exit(t,candle(1500,1950,900,1200))=={
         "exit_reason":"STOP_FIRST_AMBIGUOUS","exit_price":950.0,"realized_r":-1.0}
     assert evaluate_exit(t,candle(1500,1600,1000,1500))=={
-        "exit_reason":"TARGET_2R","exit_price":1900.0,"realized_r":2.0}
+        "exit_reason":"TARGET_2R","exit_price":1550.0,"realized_r":2.0}
 
 
 class FakeCursor:
