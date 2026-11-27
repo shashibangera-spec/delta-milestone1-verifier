@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPBasicCredentials
 
 from browser_dashboard.auction_context import build_prior_auction_context
-from browser_dashboard.main import EXPECTED_HOST, _calculate_v17_developing_profile, _connect, _discovery, _json, _session_rows, _validated_database_url, require_dashboard_auth
+from browser_dashboard.main import EXPECTED_HOST, _calculate_v17_developing_profile, _calculate_subsession_value_progression, _connect, _discovery, _json, _session_rows, _validated_database_url, require_dashboard_auth
 
 
 def rows(*closes):
@@ -17,6 +17,35 @@ def rows(*closes):
         for i, close in enumerate(closes)
     ]
 
+
+
+def test_subsession_value_progression_uses_completed_candles_and_strict_value_steps():
+    day = date(2026, 11, 28)
+    start = datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc)
+    candles = [
+        {"candle_time": start, "open_value": 110, "high_value": 200, "low_value": 100, "close_value": 190},
+        {"candle_time": start + timedelta(hours=8), "open_value": 210, "high_value": 300, "low_value": 200, "close_value": 290},
+        {"candle_time": start + timedelta(hours=13, minutes=30), "open_value": 160, "high_value": 250, "low_value": 150, "close_value": 240},
+        # This candle is not closed as of 14:15 UTC and must not enter the profile.
+        {"candle_time": start + timedelta(hours=14), "open_value": 240, "high_value": 350, "low_value": 240, "close_value": 340},
+    ]
+
+    result = _calculate_subsession_value_progression(
+        candles, day, start + timedelta(days=1)
+    )
+
+    assert [row["candles"] for row in result] == [1, 1, 2]
+    assert [row["value_step"] for row in result] == [
+        "INITIAL", "VALUE STEPPED UP", "VALUE STEPPED DOWN"
+    ]
+    assert result[0]["sub_session"] == "Asia (00:00–08:00 UTC / 05:30–13:30 IST)"
+    assert result[1]["sub_session"] == "Europe (08:00–13:30 UTC / 13:30–19:00 IST)"
+    assert result[2]["sub_session"] == "US Cash (13:30–00:00 UTC / 19:00–05:30 IST)"
+    assert (result[0]["val"], result[0]["poc"], result[0]["vah"]) == (100, 125, 250)
+    assert (result[1]["val"], result[1]["poc"], result[1]["vah"]) == (200, 225, 350)
+    assert result[2]["open"] == 160
+    assert result[2]["close"] == 340
+    assert result[2]["candles"] == 2
 
 def test_dashboard_discovery_starts_on_first_close_outside_value():
     assert _discovery(rows(60500), 60000, 59000) == "DISCOVERY_ABOVE"
