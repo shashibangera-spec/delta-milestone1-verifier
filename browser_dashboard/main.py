@@ -16,7 +16,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg.rows import dict_row
 
 from amt_engine.playbook_v13 import classify_discovery
-from browser_dashboard.auction_context import (\n    build_prior_auction_context, classify_live_range, build_prior_structure_status,\n)
+from browser_dashboard.auction_context import (
+    build_prior_auction_context, classify_live_range, build_prior_structure_status,
+)
 
 EXPECTED_HOST = "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech"
 EXPECTED_SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech"
