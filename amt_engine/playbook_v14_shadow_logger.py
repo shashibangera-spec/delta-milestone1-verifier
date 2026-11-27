@@ -144,8 +144,11 @@ def _count_open_events(conn, session_date, sub_session):
         cur.execute(
             """SELECT count(*) AS entry_count
                FROM amt_engine_v17.playbook_v14_shadow_events
-               WHERE event_type='OPEN' AND event_at >= %s AND event_at < %s""",
-            (start, end),
+               WHERE event_type='OPEN'
+                 AND payload->>'session_date' = %s
+                 AND payload->>'sub_session' = %s
+                 AND event_at >= %s AND event_at < %s""",
+            (session_date.isoformat(), sub_session, start, end),
         )
         row = cur.fetchone()
     return int(row["entry_count"] if isinstance(row, dict) else row[0])
