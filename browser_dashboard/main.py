@@ -590,7 +590,7 @@ async function refresh(){
  const currentRange=liveSwing.current_range, priorRange=liveSwing.prior_range;
  const priorStatus=liveSwing.prior_structure_status||{}, inflection=priorStatus.inflection||{};
  const liveSwingText=currentRange&&priorRange
-  ? 'LIVE INTRADAY RANGE · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
+  ? 'LIVE INTRADAY SWING VS PRIOR DAY · LIVE RANGE · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
   : 'LIVE INTRADAY RANGE · '+(liveSwing.label||'Unavailable')+' · Range comparison unavailable';
  const statusText=(priorStatus.label||'PRIOR STRUCTURE UNAVAILABLE')+(inflection.price_name?' · '+inflection.price_name+' '+fmt(inflection.price)+' · '+inflection.value_name+' '+fmt(inflection.value):'');
  const liveNode=document.getElementById('live-swing-vs-prior');
