@@ -236,14 +236,15 @@ def _calculate_subsession_value_progression(rows, session_date, now):
     now = now.astimezone(timezone.utc)
     session_start = datetime.combine(session_date, datetime.min.time(), tzinfo=timezone.utc)
     windows = [
-        ("Asia (00:00–08:00 UTC / 05:30–13:30 IST)", 0, 8),
-        ("Europe (08:00–13:30 UTC / 13:30–19:00 IST)", 8, 13.5),
-        ("US Cash (13:30–00:00 UTC / 19:00–05:30 IST)", 13.5, 24),
+        ("Prior US Overnight (20:00–00:00 UTC / 01:30–05:30 IST)", -4, 0, True),
+        ("Asia (00:00–08:00 UTC / 05:30–13:30 IST)", 0, 8, False),
+        ("Europe (08:00–13:30 UTC / 13:30–19:00 IST)", 8, 13.5, False),
+        ("US Cash (13:30–00:00 UTC / 19:00–05:30 IST)", 13.5, 24, False),
     ]
     result = []
     previous_completed_profile = None
 
-    for label, start_hour, end_hour in windows:
+    for label, start_hour, end_hour, is_prior_overnight in windows:
         start = session_start + timedelta(hours=start_hour)
         end = session_start + timedelta(hours=end_hour)
         candles = []
@@ -252,6 +253,10 @@ def _calculate_subsession_value_progression(rows, session_date, now):
             candle_close = candle_open + timedelta(minutes=30)
             if start <= candle_open < end and candle_close <= now:
                 candles.append(row)
+        if is_prior_overnight:
+            # The prior UTC date's final four-hour block contributes its last
+            # eight completed 30m candles only.
+            candles = candles[-8:]
 
         profile = None
         if candles:
