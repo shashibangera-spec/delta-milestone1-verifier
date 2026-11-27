@@ -72,13 +72,15 @@ def read_developing(c):
     with c.cursor() as q:
         q.execute("""SELECT candle_open,candle_close,developing_vah_upper,developing_val_lower
           FROM amt_engine_v17.developing_snapshots WHERE method_version=%s AND source=%s AND symbol=%s
-          AND session_date BETWEEN %s AND %s ORDER BY candle_open""",(METHOD,SOURCE,SYMBOL,START,END)); rows=q.fetchall()
+          AND session_date BETWEEN %s AND %s AND session_date <> %s ORDER BY candle_open""",(METHOD,SOURCE,SYMBOL,START,END,next(iter(EXCLUDED)))); rows=q.fetchall()
     out={}
     for r in rows:
         ts=r["candle_open"].astimezone(UTC)
+        close_ts=r["candle_close"].astimezone(UTC)
+        if close_ts != ts+BAR: raise ResearchError(f"{ts}: developing snapshot is not aligned to a completed 30m candle")
         if r["developing_vah_upper"] is None or r["developing_val_lower"] is None: continue
         if ts in out: raise ResearchError(f"{ts}: duplicate developing snapshot")
-        out[ts]={"vah":float(r["developing_vah_upper"]),"val":float(r["developing_val_lower"]),"close_ts":r["candle_close"].astimezone(UTC)}
+        out[ts]={"vah":float(r["developing_vah_upper"]),"val":float(r["developing_val_lower"]),"close_ts":close_ts}
     if len(out)!=9072: raise ResearchError(f"Expected 9,072 developing snapshots, got {len(out)}")
     return out
 
@@ -230,16 +232,16 @@ def test_dv(bars,dv):
             active={"direction":direction,"boundary":boundary,
                     "extreme":b["high"] if direction=="UP" else b["low"]}
 
-    # Exact dollar matching means a $1 stop-distance bucket: event and control
-    # risks are rounded to the nearest whole dollar before matching.
-    event_bars={x["entry_time"]-BAR for x in events}; controls=[]; match_keys=set()
+    # Stop distances are matched at exact whole-dollar precision: both event and
+    # control risk are assigned to the same nearest-$1 distance bucket.
+    event_bars={x["entry_time"]-BAR for x in events}; controls=[]; match_keys=set(); approved=set(approved_dates())
     for e in events:
         key=(e["month"],e["window"],e["side"],e["risk_bucket"],e["kind"])
         if key in match_keys: continue
         match_keys.add(key); risk=float(e["risk_bucket"])
         for ts in times:
             if (ts.date().strftime("%Y-%m")!=e["month"] or utc_window(ts)!=e["window"]
-                or ts.date() in EXCLUDED or ts in event_bars):
+                or ts.date() not in approved or ts in event_bars):
                 continue
             entry=bars[ts]["close"]
             stop=entry-risk if e["side"]=="LONG" else entry+risk
@@ -251,7 +253,7 @@ def test_dv(bars,dv):
 
     print("\nTEST 2 — DEVELOPING VALUE RECLAIM VS CONTINUATION / MATCHED CONTROLS")
     print("Events: first outside close per excursion; continuation enters that close; reclaim enters first later close inside contemporaneous developing value; stop at excursion extreme.")
-    print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and nearest whole-dollar stop-distance; 2R; stop-first.")
+    print("Controls: non-event bars matched by calendar month, UTC window, direction, setup type and exact whole-dollar stop-distance; 2R; stop-first.")
     for w in ("Asia + Europe","US Cash"):
         for kind in ("Continuation","Reclaim"):
             ev=[x for x in events if x["window"]==w and x["kind"]==kind]
