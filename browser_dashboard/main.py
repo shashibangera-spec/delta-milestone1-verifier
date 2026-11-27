@@ -518,7 +518,8 @@ def _calculate_nifty_intraday_value_progression(bars, session_date, now, profile
             candle_start = datetime.combine(
                 session_date, datetime.min.time(), tzinfo=ist
             ) + timedelta(minutes=15 + 30 * (bracket - 1))
-            if candle_start + timedelta(minutes=30) > now:
+            candle_duration = timedelta(minutes=15 if bracket == 13 else 30)
+            if candle_start + candle_duration > now:
                 break
             selected.append(bar)
             expected += 1
@@ -554,7 +555,7 @@ def _calculate_nifty_intraday_value_progression(bars, session_date, now, profile
 
         window_end = datetime.combine(
             session_date, datetime.min.time(), tzinfo=ist
-        ) + timedelta(minutes=15 + 30 * last_bracket)
+        ) + timedelta(minutes=15 + 30 * (last_bracket - 1) + (15 if last_bracket == 13 else 30))
         if now >= window_end and profile is not None:
             previous_completed_profile = profile
 
