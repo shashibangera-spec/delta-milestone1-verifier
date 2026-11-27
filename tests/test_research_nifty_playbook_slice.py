@@ -12,7 +12,7 @@ from amt_engine.nifty_v17 import EXPECTED_HOST
 def test_readonly_database_url_requires_pinned_reader_role_and_database():
     good=f"postgresql://amt_dashboard_ro:secret@{EXPECTED_HOST}/amt_research"
     assert validate_readonly_url(good).hostname == EXPECTED_HOST
-    with pytest.raises(RuntimeError, match="read-only"):
+    with pytest.raises(RuntimeError, match="amt_dashboard_ro"):
         validate_readonly_url(f"postgresql://amt_nifty_writer_login:secret@{EXPECTED_HOST}/amt_research")
 
 
