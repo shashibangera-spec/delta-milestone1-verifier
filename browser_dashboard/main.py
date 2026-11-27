@@ -445,7 +445,8 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}
   <div class="level"><small>Asia · 00:00–08:00</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>Europe · 08:00–13:30</small><b>—</b><div class="sub">Range / extension</div></div>
   <div class="level"><small>US · 13:30–00:00</small><b>—</b><div class="sub">Range / extension</div></div>
- </div><div class="sub">Range development only; no directional prediction</div>
+ </div><div class="sub" id="live-swing-vs-prior">Live intraday swing vs prior completed auction: awaiting completed candles</div>
+ <div class="sub">Range development only; factual comparison of completed 30m candles, no directional prediction</div>
 </section>
 <section class="panel section"><h2>Playbook V1.3 — active and recent shadow trades</h2>
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
@@ -476,6 +477,12 @@ async function refresh(){
  document.getElementById('auction-migration').textContent=auction.value_migration||'Unavailable';
  document.getElementById('auction-swing').textContent=auction.swing_structure||'Unavailable';
  document.getElementById('auction-date').textContent=auction.session_date?'Completed auction '+auction.session_date+' UTC · descriptive, non-predictive':'Completed auction context unavailable';
+ const liveSwing=auction.live_intraday_swing||{};
+ const currentRange=liveSwing.current_range, priorRange=liveSwing.prior_range;
+ const liveSwingText=currentRange&&priorRange
+  ? 'LIVE INTRADAY SWING VS PRIOR DAY · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
+  : 'LIVE INTRADAY SWING VS PRIOR DAY · '+(liveSwing.label||'Unavailable')+' · Range comparison unavailable';
+ document.getElementById('live-swing-vs-prior').textContent=liveSwingText;
  document.getElementById('subsessions').innerHTML=(auction.subsessions||[]).map((s,i)=>{
   const range=s.range?fmt(s.range.low)+' – '+fmt(s.range.high):'Not started';
   const label=['Asia · 00:00–08:00','Europe · 08:00–13:30','US · 13:30–00:00'][i];
