@@ -6,6 +6,12 @@ then replays the unchanged Playbook v1.3 build_signal/evaluate_exit functions.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure direct script execution can resolve the repository's amt_engine package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import argparse
 import json
 import math
