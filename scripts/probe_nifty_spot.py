@@ -14,19 +14,14 @@ import yfinance as yf
 IST = ZoneInfo("Asia/Kolkata")
 SYMBOL = "^NSEI"
 NSE_SYMBOL = "NIFTY 50"
-NSE_TOKEN = "26000"  # NSE index token used by the public charting feed
-LOOKBACK_DAYS = 60
+NSE_TOKEN = "26000"
+LOOKBACK_DAYS = 55
+YAHOO_PERIOD = "55d"
 ROW_SIZE = 10.0
 VALUE_AREA_FRACTION = 0.70
-BAR_STARTS = [datetime.strptime("09:15", "%H:%M").time()]
-BAR_STARTS += [
+EXPECTED_SESSION_BARS = [
     (datetime.strptime("09:15", "%H:%M") + timedelta(minutes=15 * i)).time()
-    for i in range(1, 25)
-]
-EXPECTED_15M = [datetime.strptime("09:15", "%H:%M").time()]
-EXPECTED_15M += [
-    (datetime.strptime("09:15", "%H:%M") + timedelta(minutes=15 * i)).time()
-    for i in range(1, 25)
+    for i in range(25)
 ]
 
 
@@ -51,7 +46,6 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
         raise RuntimeError(f"{source}: missing OHLC columns {missing}; got {list(df.columns)}")
     ts = pd.to_datetime(df["timestamp"], errors="coerce")
     if getattr(ts.dt, "tz", None) is None:
-        # Yahoo returns UTC-aware timestamps; OpenChart may return local-naive timestamps.
         ts = ts.dt.tz_localize(IST)
     else:
         ts = ts.dt.tz_convert(IST)
@@ -60,13 +54,12 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["timestamp"] + required).copy()
 
-    # OpenChart examples use end labels such as 15:14:59. Convert those to
-    # their 15-minute interval start; Yahoo normally uses interval-start labels.
+    # OpenChart commonly labels a 15m candle by its final second (e.g. 09:29:59).
     adjusted = []
-    for ts in df["timestamp"]:
-        if ts.second >= 50 and ts.minute in (14, 29, 44, 59):
-            ts = ts - pd.Timedelta(minutes=15)
-        adjusted.append(ts.floor("min"))
+    for stamp in df["timestamp"]:
+        if stamp.second >= 50 and stamp.minute in (14, 29, 44, 59):
+            stamp = stamp - pd.Timedelta(minutes=15)
+        adjusted.append(stamp.floor("min"))
     df["timestamp"] = adjusted
     df["timestamp"] = df["timestamp"].dt.floor("15min")
     df = df.drop_duplicates(subset=["timestamp"], keep="last").sort_values("timestamp")
@@ -74,35 +67,105 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
 
 
 def fetch_yahoo(start: datetime, end: datetime) -> pd.DataFrame:
+    print(f"Yahoo request: symbol={SYMBOL} interval=15m period={YAHOO_PERIOD}")
     raw = yf.download(
-        SYMBOL, start=start.date().isoformat(), end=(end.date() + timedelta(days=1)).isoformat(),
-        interval="15m", auto_adjust=False, prepost=False, progress=False, threads=False
+        SYMBOL,
+        period=YAHOO_PERIOD,
+        interval="15m",
+        auto_adjust=False,
+        prepost=False,
+        progress=False,
+        threads=False,
     )
     if raw is None or raw.empty:
-        raise RuntimeError("Yahoo returned no rows for ^NSEI 15m")
+        raise RuntimeError(f"Yahoo returned no rows for {SYMBOL} 15m period={YAHOO_PERIOD}")
     raw = raw.reset_index()
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = [c[0] if isinstance(c, tuple) else c for c in raw.columns]
-    return normalize_frame(raw, "Yahoo")
+    frame = normalize_frame(raw, "Yahoo")
+    print(
+        "Yahoo exact candle timestamp span (IST): "
+        f"oldest={frame.timestamp.min().isoformat()} | "
+        f"newest={frame.timestamp.max().isoformat()} | rows={len(frame)}"
+    )
+    return frame
 
 
 def fetch_nse(start: datetime, end: datetime) -> pd.DataFrame:
-    # OpenChart wraps NSE's publicly accessible charting endpoints; it does not
-    # represent an official NSE-supported API or imply an availability SLA.
+    """Fetch NIFTY 50 15m bars using an explicit NSE homepage cookie handshake."""
     from openchart import NSEData
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+        "Referer": "https://www.nseindia.com/",
+    })
+
+    print("NSE cookie handshake: GET https://www.nseindia.com/")
+    try:
+        handshake = session.get("https://www.nseindia.com/", timeout=20)
+        print(
+            f"NSE homepage handshake HTTP status={handshake.status_code}; "
+            f"cookies_received={len(session.cookies)}"
+        )
+        handshake.raise_for_status()
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        print(f"NSE homepage handshake failed: HTTP status={status!r}; error={exc}")
+        raise RuntimeError(f"NSE homepage cookie handshake failed (HTTP {status}): {exc}") from exc
+
+    chart_statuses: list[tuple[str, int]] = []
+
+    def log_chart_response(response, *args, **kwargs):
+        if "symbolHistoricalData" in response.url or "symbolsDynamic" in response.url:
+            chart_statuses.append((response.url, response.status_code))
+            print(f"NSE chart API response: HTTP {response.status_code} {response.url}")
+        return response
+
+    session.hooks["response"].append(log_chart_response)
+
+    # Reuse the exact session that received the homepage cookies. OpenChart's
+    # own _ensure_cookies() is marked complete so it does not replace this session.
     client = NSEData()
+    session.headers.update({
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://charting.nseindia.com",
+        "Referer": "https://charting.nseindia.com/",
+    })
+    client.session = session
+    client._cookies_set = True
+
     raw = client.historical(
-        NSE_SYMBOL, "IDX",
-        start=start, end=end, interval="15m"
+        NSE_SYMBOL, "IDX", start=start, end=end, interval="15m"
     )
     if raw is None or raw.empty:
-        raise RuntimeError("NSE chart API/OpenChart returned no rows for NIFTY 50 15m")
+        last_status = chart_statuses[-1][1] if chart_statuses else None
+        raise RuntimeError(
+            "NSE chart API/OpenChart returned no NIFTY 50 15m rows; "
+            f"last chart API HTTP status={last_status!r}"
+        )
     raw = raw.reset_index()
     if "Timestamp" in raw.columns:
         raw = raw.rename(columns={"Timestamp": "timestamp"})
     elif "timestamp" not in [str(c).lower() for c in raw.columns]:
         raw = raw.rename(columns={raw.columns[0]: "timestamp"})
-    return normalize_frame(raw, "NSE chart API")
+    frame = normalize_frame(raw, "NSE chart API")
+    print(
+        "NSE exact candle timestamp span (IST): "
+        f"oldest={frame.timestamp.min().isoformat()} | "
+        f"newest={frame.timestamp.max().isoformat()} | rows={len(frame)}"
+    )
+    return frame
 
 
 def aggregate_13_brackets(df: pd.DataFrame) -> tuple[dict, dict]:
@@ -113,32 +176,42 @@ def aggregate_13_brackets(df: pd.DataFrame) -> tuple[dict, dict]:
     diagnostics: dict = {}
     today = datetime.now(IST).date()
     for day, group in work.groupby("session_date"):
-        # Only completed exchange sessions; never include today's developing session.
         if day >= today:
             continue
         by_start = {row.timestamp.time(): row for row in group.itertuples(index=False)}
         bars = []
-        missing = []
+        missing_brackets = []
+        missing_candle_starts = []
         for i in range(13):
             start_min = 9 * 60 + 15 + i * 30
             end_min = min(start_min + 30, 15 * 60 + 30)
             t0 = (datetime.combine(day, datetime.min.time()) + timedelta(minutes=start_min)).time()
-            t1 = (datetime.combine(day, datetime.min.time()) + timedelta(minutes=(start_min + 15))).time()
+            t1 = (datetime.combine(day, datetime.min.time()) + timedelta(minutes=start_min + 15)).time()
             needed = [t0] if i == 12 else [t0, t1]
-            rows = [by_start.get(t) for t in needed]
-            if any(r is None for r in rows):
-                missing.append(f"{t0.strftime('%H:%M')}-{(datetime.combine(day, datetime.min.time()) + timedelta(minutes=end_min)).strftime('%H:%M')}")
+            absent = [t for t in needed if t not in by_start]
+            if absent:
+                label = (
+                    f"{t0.strftime('%H:%M')}-"
+                    f"{(datetime.combine(day, datetime.min.time()) + timedelta(minutes=end_min)).strftime('%H:%M')}"
+                )
+                missing_brackets.append(label)
+                missing_candle_starts.extend(t.strftime("%H:%M") for t in absent)
                 continue
+            rows = [by_start[t] for t in needed]
             bars.append({
-                "date": day, "bracket": i + 1,
-                "start": t0.strftime("%H:%M"),
+                "date": day, "bracket": i + 1, "start": t0.strftime("%H:%M"),
                 "open": float(rows[0].open),
                 "high": max(float(r.high) for r in rows),
                 "low": min(float(r.low) for r in rows),
                 "close": float(rows[-1].close),
             })
-        diagnostics[day] = {"received_15m": len(group), "brackets": len(bars), "missing": missing}
-        if len(bars) == 13 and not missing:
+        diagnostics[day] = {
+            "received_15m": len(group),
+            "brackets": len(bars),
+            "missing_brackets": missing_brackets,
+            "missing_candle_starts": missing_candle_starts,
+        }
+        if len(bars) == 13 and not missing_brackets:
             sessions[day] = pd.DataFrame(bars)
     return sessions, diagnostics
 
@@ -152,9 +225,8 @@ def profile(bars: pd.DataFrame) -> dict:
             counts[level] = counts.get(level, 0) + 1
     if not counts:
         raise RuntimeError("Cannot calculate profile with no TPO rows")
-    poc = max(counts, key=lambda k: (counts[k], -k))  # lower row wins a POC tie
-    total = sum(counts.values())
-    target = total * VALUE_AREA_FRACTION
+    poc = max(counts, key=lambda k: (counts[k], -k))
+    target = sum(counts.values()) * VALUE_AREA_FRACTION
     included = {poc}
     covered = counts[poc]
     low, high = poc, poc
@@ -163,11 +235,14 @@ def profile(bars: pd.DataFrame) -> dict:
         cb, ca = counts.get(below, 0), counts.get(above, 0)
         if cb == 0 and ca == 0:
             break
-        # Expand toward the larger adjacent TPO count; tie resolves downward.
         if cb >= ca and cb > 0:
-            included.add(below); low = below; covered += cb
+            included.add(below)
+            low = below
+            covered += cb
         elif ca > 0:
-            included.add(above); high = above; covered += ca
+            included.add(above)
+            high = above
+            covered += ca
     return {
         "VAH": (max(included) + 1) * ROW_SIZE,
         "POC": (poc + 0.5) * ROW_SIZE,
@@ -219,30 +294,46 @@ def print_table(title: str, rows: list[dict]) -> None:
     widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in cols}
     print(" | ".join(c.ljust(widths[c]) for c in cols))
     print("-+-".join("-" * widths[c] for c in cols))
-    for r in rows:
-        print(" | ".join(str(r[c]).ljust(widths[c]) for c in cols))
+    for row in rows:
+        print(" | ".join(str(row[c]).ljust(widths[c]) for c in cols))
+
+
+def print_diagnostics(name: str, diagnostics: dict) -> None:
+    print(f"{name} per-session bracket diagnostics:")
+    if not diagnostics:
+        print("  No dated 15m rows to inspect.")
+        return
+    for day in sorted(diagnostics):
+        item = diagnostics[day]
+        status = "COMPLETE" if item["brackets"] == 13 else "INCOMPLETE"
+        print(
+            f"  {day}: {status}; received_15m={item['received_15m']}; "
+            f"complete_brackets={item['brackets']}/13; "
+            f"missing_brackets={item['missing_brackets'] or 'none'}; "
+            f"missing_15m_starts={item['missing_candle_starts'] or 'none'}"
+        )
 
 
 def main() -> int:
     now = datetime.now(IST)
     start = now - timedelta(days=LOOKBACK_DAYS)
     print("NIFTY 50 SPOT — READ-ONLY SOURCE PROBE")
-    print(f"Run time: {now.isoformat()} | Window: {start.date()} to {now.date()} | interval: 15m")
+    print(
+        f"Run time: {now.isoformat()} | Yahoo period={YAHOO_PERIOD} "
+        f"(calendar lookback={LOOKBACK_DAYS} days; {start.isoformat()} to {now.isoformat()}) | interval: 15m"
+    )
     print("Aggregation: 09:15 IST anchored; 12 x 30m + final 15m (15:15–15:30)")
-    print("TPO: 10-point rows; each aggregated bracket contributes one TPO to every inclusive floor(low/10)..floor(high/10) row; VA=70%.")
+    print("TPO: 10-point rows; each bracket contributes one TPO to every inclusive floor(low/10)..floor(high/10) row; VA=70%.")
     results = {}
     for name, fetch in (("Yahoo ^NSEI", fetch_yahoo), ("NSE chart API / OpenChart", fetch_nse)):
         print(f"\n=== {name} ===")
         try:
             frame = fetch(start, now)
-            sessions, diag = aggregate_13_brackets(frame)
+            sessions, diagnostics = aggregate_13_brackets(frame)
             results[name] = sessions
-            print(f"Raw 15m rows: {len(frame)} | raw date span: {frame.timestamp.min()} .. {frame.timestamp.max()}")
-            print(f"Trading dates received: {len(diag)} | complete 13-bracket sessions: {len(sessions)}")
-            for d in sorted(diag)[-10:]:
-                x = diag[d]
-                if x["brackets"] != 13:
-                    print(f"INCOMPLETE {d}: 15m_rows={x['received_15m']} complete_brackets={x['brackets']} missing={','.join(x['missing'])}")
+            print(f"Raw 15m rows: {len(frame)}")
+            print_diagnostics(name, diagnostics)
+            print(f"Complete 13-bracket sessions: {len(sessions)}")
             rows = classify_rows(dict(sorted(sessions.items())[-10:]))
             print_table("Last 10 complete sessions — " + name, rows)
         except Exception as exc:
@@ -250,7 +341,8 @@ def main() -> int:
             traceback.print_exc()
             results[name] = None
 
-    yahoo, nse = results.get("Yahoo ^NSEI"), results.get("NSE chart API / OpenChart")
+    yahoo = results.get("Yahoo ^NSEI")
+    nse = results.get("NSE chart API / OpenChart")
     print("\n=== CROSS-SOURCE OHLC COMPARISON ===")
     if yahoo is None or nse is None:
         print("Comparison unavailable: at least one source failed.")
@@ -269,16 +361,37 @@ def main() -> int:
                     if delta > 0.01:
                         discrepancies += 1
                         if len(examples) < 20:
-                            examples.append(f"{day} {a.iloc[i]['start']} {col}: Yahoo={a.iloc[i][col]:.2f} NSE={b.iloc[i][col]:.2f} Δ={delta:.2f}")
-        print(f"Common complete sessions: {len(common)} | bracket comparisons: {compared} | field discrepancies > ₹0.01: {discrepancies}")
+                            examples.append(
+                                f"{day} {a.iloc[i]['start']} {col}: "
+                                f"Yahoo={a.iloc[i][col]:.2f} NSE={b.iloc[i][col]:.2f} Δ={delta:.2f}"
+                            )
+        print(
+            f"Common complete sessions: {len(common)} | bracket comparisons: {compared} | "
+            f"field discrepancies > ₹0.01: {discrepancies}"
+        )
         print("Max absolute difference (₹): " + ", ".join(f"{k}={v:.2f}" for k, v in max_abs.items()))
         if examples:
             print("First discrepancies:")
-            for x in examples:
-                print("  " + x)
+            for example in examples:
+                print("  " + example)
         else:
             print("No OHLC field differences above ₹0.01 in compared brackets.")
-    print("\nProbe completed. No database, repository data, or production service writes were performed.")
+
+    total_complete = sum(len(v) for v in results.values() if v is not None)
+    failed_sources = [name for name, value in results.items() if value is None]
+    print(
+        f"\nProbe summary: failed_sources={failed_sources or 'none'}; "
+        f"total_source_complete_sessions={total_complete}"
+    )
+    print("No database, repository data, or production service writes were performed.")
+    if len(failed_sources) == 2:
+        print("FATAL: both data sources failed; returning exit status 1.")
+        return 1
+    if total_complete == 0:
+        print("FATAL: zero complete 13-bracket sessions across all sources; returning exit status 1.")
+        return 1
+    if failed_sources:
+        print("WARNING: one source failed; available source results are partial.")
     return 0
 
 
