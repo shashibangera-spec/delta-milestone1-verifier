@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      NIFTY_V17_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+      NIFTY_V17_READONLY_DATABASE_URL: ${{ secrets.NIFTY_V17_READONLY_DATABASE_URL }}
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: .
     steps:
