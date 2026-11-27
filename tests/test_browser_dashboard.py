@@ -231,3 +231,55 @@ def test_developing_value_card_disclaims_playbook_reference_replacement():
     assert "CURRENT SESSION" in HTML
     assert "frozen Prior Reference VAH/POC/VAL" in HTML
     assert "used by Playbook v1.3" in HTML
+
+
+@pytest.mark.parametrize(
+    "current_high,current_low,expected",
+    [
+        (121, 96, "HH / HL"),
+        (119, 84, "LL / LH"),
+        (121, 84, "HH / LL (Outside)"),
+        (120, 95, "LH / HL (Inside)"),
+    ],
+)
+def test_live_intraday_swing_compares_current_completed_range_to_prior_auction(
+    current_high, current_low, expected
+):
+    profiles = [
+        {"session_date": date(2026, 11, 25), "poc_lower": 100, "vah_upper": 110, "val_lower": 90},
+        {"session_date": date(2026, 11, 26), "poc_lower": 102, "vah_upper": 112, "val_lower": 92},
+    ]
+    candles = [
+        {"session_date": date(2026, 11, 25), "range": {"high": 115, "low": 85, "close": 105}},
+        {"session_date": date(2026, 11, 26), "range": {"high": 120, "low": 95, "close": 114}},
+    ]
+    current = [{
+        "candle_time": datetime(2026, 11, 27, 0, 0, tzinfo=timezone.utc),
+        "high_value": current_high, "low_value": current_low, "close_value": 100,
+    }]
+    result = build_prior_auction_context(profiles, candles, current)
+    swing = result["live_intraday_swing"]
+    assert swing["label"] == expected
+    assert swing["current_range"] == {"low": current_low, "high": current_high}
+    assert swing["prior_range"] == {"low": 95, "high": 120}
+    assert swing["completed_candles"] == 1
+
+
+def test_live_intraday_swing_is_unavailable_without_current_completed_candles():
+    profiles = [
+        {"session_date": date(2026, 11, 25), "poc_lower": 100, "vah_upper": 110, "val_lower": 90},
+        {"session_date": date(2026, 11, 26), "poc_lower": 102, "vah_upper": 112, "val_lower": 92},
+    ]
+    candles = [
+        {"session_date": date(2026, 11, 25), "range": {"high": 115, "low": 85, "close": 105}},
+        {"session_date": date(2026, 11, 26), "range": {"high": 120, "low": 95, "close": 114}},
+    ]
+    result = build_prior_auction_context(profiles, candles, [])
+    assert result["live_intraday_swing"]["label"] == "Unavailable"
+    assert result["live_intraday_swing"]["current_range"] is None
+
+
+def test_dashboard_renders_live_intraday_swing_as_descriptive_visual_aid():
+    from browser_dashboard.main import HTML
+    assert "LIVE INTRADAY SWING VS PRIOR DAY" in HTML
+    assert "factual comparison of completed 30m candles" in HTML
