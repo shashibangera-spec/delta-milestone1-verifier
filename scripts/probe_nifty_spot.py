@@ -36,6 +36,7 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    df = df.loc[:, ~df.columns.duplicated()].copy()
     aliases = {"adj_close": "close", "datetime": "timestamp", "date": "timestamp"}
     df = df.rename(columns=aliases)
     if "timestamp" not in df.columns:
@@ -55,7 +56,8 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
         ts = ts.dt.tz_convert(IST)
     df["timestamp"] = ts
     for col in required:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        col_data = df[col].iloc[:, 0] if isinstance(df[col], pd.DataFrame) else df[col]
+        df[col] = pd.to_numeric(col_data, errors="coerce")
     df = df.dropna(subset=["timestamp"] + required).copy()
 
     # OpenChart commonly labels a 15m candle by its final second (e.g. 09:29:59).
@@ -72,15 +74,10 @@ def normalize_frame(frame: pd.DataFrame, source: str) -> pd.DataFrame:
 
 def fetch_yahoo(start: datetime, end: datetime) -> pd.DataFrame:
     print(f"Yahoo request: symbol={SYMBOL} interval=15m period={YAHOO_PERIOD}")
-    raw = yf.download(
-        SYMBOL,
-        period=YAHOO_PERIOD,
+    raw = yf.Ticker(SYMBOL).history(
+        period="55d",
         interval="15m",
         auto_adjust=False,
-        prepost=False,
-        progress=False,
-        threads=False,
-        multi_level_index=False,
     )
     if raw is None or raw.empty:
         raise RuntimeError(f"Yahoo returned no rows for {SYMBOL} 15m period={YAHOO_PERIOD}")
