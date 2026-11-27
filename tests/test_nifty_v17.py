@@ -54,3 +54,11 @@ def test_writer_url_is_pinned_to_role_branch_and_database():
  assert validate_writer_url(good).hostname==EXPECTED_HOST
  with pytest.raises(RuntimeError,match="host"): validate_writer_url(f"postgresql://{WRITER_ROLE}:secret@wrong.neon.tech/amt_research")
  with pytest.raises(RuntimeError,match="must use"): validate_writer_url(f"postgresql://other:secret@{EXPECTED_HOST}/amt_research")
+
+
+def test_dashboard_adds_nifty_tab_without_changing_default_btc_view():
+    from browser_dashboard.main import HTML, app
+    assert "BTCUSD" in HTML and "NIFTY 50 SPOT" in HTML
+    assert "let activeMarket='btc'" in HTML
+    assert 'id="btc-view"' in HTML and 'id="nifty-view"' in HTML
+    assert any(route.path == "/api/nifty-overview" for route in app.routes)
