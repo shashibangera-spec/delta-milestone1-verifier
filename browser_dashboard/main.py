@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from psycopg.rows import dict_row
 
 from amt_engine.playbook_v13 import classify_discovery
-from browser_dashboard.auction_context import build_prior_auction_context
+from browser_dashboard.auction_context import (\n    build_prior_auction_context, classify_live_range, build_prior_structure_status,\n)
 
 EXPECTED_HOST = "ep-morning-mountain-aopl02wv.c-2.ap-southeast-1.aws.neon.tech"
 EXPECTED_SOURCE_HOST = "ep-sparkling-queen-aoqgp0mw.c-2.ap-southeast-1.aws.neon.tech"
@@ -385,15 +385,35 @@ def load_nifty_overview():
                                   close_location,value_migration,range_structure,profile_sha256
                            FROM amt_nifty_v17.sessions ORDER BY session_date DESC LIMIT 1""")
             prior = cur.fetchone()
+    current_range = None if current_rows.empty else {
+        "high":float(current_rows["high"].max()),"low":float(current_rows["low"].min())}
+    prior_range = None if prior is None else {
+        "high":float(prior["session_high"]),"low":float(prior["session_low"])}
+    nifty_live_swing = {"label":"Unavailable","current_range":None,"prior_range":prior_range,
+                        "prior_structure_status":build_prior_structure_status(
+                            prior.get("range_structure") if prior else None, None, None,
+                            prior_range["high"] if prior_range else None,
+                            prior_range["low"] if prior_range else None,
+                            float(prior["vah"]) if prior and prior.get("vah") is not None else None,
+                            float(prior["val"]) if prior and prior.get("val") is not None else None)}
+    if current_range and prior_range:
+        nifty_live_swing = {
+            "label": classify_live_range(current_range["high"], current_range["low"],
+                                          prior_range["high"], prior_range["low"]),
+            "current_range": current_range, "prior_range": prior_range,
+            "prior_structure_status": build_prior_structure_status(
+                prior.get("range_structure") if prior else None,
+                current_range["high"], current_range["low"],
+                prior_range["high"], prior_range["low"],
+                float(prior["vah"]) if prior and prior.get("vah") is not None else None,
+                float(prior["val"]) if prior and prior.get("val") is not None else None)}
     return _json({"as_of_utc":now,"latest_price":None if latest is None else {
         "close":float(latest["close"]),"timestamp":latest["timestamp"].to_pydatetime()},
         "prior":prior,"developing":None if developing is None else {
         "dvah":developing["vah"],"dpoc":developing["poc"],"dval":developing["val"],"status":"READY"},
         "progress":f"{len(prefix)}/13","diagnostics":diagnostics,
-        "current_range":None if current_rows.empty else {
-        "high":float(current_rows["high"].max()),"low":float(current_rows["low"].min())},
-        "prior_range":None if prior is None else {
-        "high":float(prior["session_high"]),"low":float(prior["session_low"])}})
+        "current_range":current_range,"prior_range":prior_range,
+        "live_intraday_swing":nifty_live_swing})
 
 
 @app.get("/api/nifty-overview")
@@ -445,7 +465,7 @@ small,.muted{color:var(--muted)}.stamp{font:12px ui-monospace,monospace;color:va
 table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-weight:600}
 .scroll{overflow-x:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:11px}
 .green{color:var(--green)}.red{color:var(--red)}.amber{color:var(--amber)}.cyan{color:var(--cyan)}
-footer{margin-top:18px;color:var(--muted);font-size:11px}
+footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margin-top:9px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-weight:700}
 .tabbar{display:flex;gap:8px;margin:0 0 16px}.tab{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 16px;border-radius:9px;font-weight:650;cursor:pointer}.tab.active{color:var(--text);border-color:var(--cyan);box-shadow:inset 0 -2px var(--cyan)}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){main{padding:12px}.grid{grid-template-columns:1fr 1fr}.metric{font-size:19px}.levels{grid-template-columns:1fr}}
@@ -462,7 +482,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}
 </section>
 <section class="panel section"><h2>Prior Completed Session · VAH / POC / VAL</h2><div class="levels"><div class="level"><small>VAH</small><b id="nifty-vah">—</b></div><div class="level"><small>POC</small><b id="nifty-poc">—</b></div><div class="level"><small>VAL</small><b id="nifty-val">—</b></div></div></section>
 <section class="panel section"><h2>Live Developing Value · <span id="nifty-progress">0/13</span> completed brackets</h2><div class="levels"><div class="level"><small>dVAH</small><b id="nifty-dvah">—</b></div><div class="level"><small>dPOC</small><b id="nifty-dpoc">—</b></div><div class="level"><div><small>dVAL</small><b id="nifty-dval">—</b></div></div></div><div class="sub" id="nifty-developing-status">Completed 15m Yahoo candles only.</div></section>
-<section class="panel section"><h2>Live Intraday Range vs. Prior Day</h2><div class="levels"><div class="level"><small>Current High</small><b id="nifty-current-high">—</b></div><div class="level"><small>Current Low</small><b id="nifty-current-low">—</b></div><div class="level"><small>Prior Range</small><b id="nifty-prior-range">—</b></div></div><div class="sub" id="nifty-range-status">Read-only completed 15m Yahoo range comparison.</div></section>
+<section class="panel section"><h2>Live Intraday Range vs. Prior Day</h2><div class="levels"><div class="level"><small>Current High</small><b id="nifty-current-high">—</b></div><div class="level"><small>Current Low</small><b id="nifty-current-low">—</b></div><div class="level"><small>Prior Range</small><b id="nifty-prior-range">—</b></div></div><div class="sub" id="nifty-range-status">Read-only completed 15m Yahoo range comparison.</div><div class="sub" id="nifty-range-classification">Live range structure: —</div><div class="sub structure-status" id="nifty-prior-structure-status">Prior structure: —</div></section>
 <footer>NIFTY 50 Spot · Yahoo Finance ^NSEI · 10-point TPO rows · 70% value area · 09:15–15:30 IST. No OI or BTC data dependency.</footer>
 </section>
 <div id="btc-view">
@@ -535,6 +555,10 @@ async function refreshNifty(){
  document.getElementById('nifty-current-high').textContent=fmt(cr.high);document.getElementById('nifty-current-low').textContent=fmt(cr.low);
  document.getElementById('nifty-prior-range').textContent=pr.high===undefined?'—':fmt(pr.low)+' – '+fmt(pr.high);
  document.getElementById('nifty-range-status').textContent=cr.high===undefined?'Current completed-candle range unavailable.':'Current completed-candle range '+fmt(cr.low)+' – '+fmt(cr.high)+(pr.high===undefined?'':' vs prior '+fmt(pr.low)+' – '+fmt(pr.high));
+ const ns=d.live_intraday_swing||{},nps=ns.prior_structure_status||{},ni=nps.inflection||{};
+ document.getElementById('nifty-range-classification').textContent='LIVE RANGE STRUCTURE · '+(ns.label||'Unavailable');
+ document.getElementById('nifty-prior-structure-status').textContent=(nps.label||'PRIOR STRUCTURE UNAVAILABLE')+(ni.price_name?' · '+ni.price_name+' '+fmt(ni.price)+' · '+ni.value_name+' '+fmt(ni.value):'');
+ document.getElementById('nifty-prior-structure-status').className='sub structure-status '+(nps.status==='BROKEN'?'red':nps.status==='INTACT'?'green':'amber');
 }
 
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
@@ -562,10 +586,14 @@ async function refresh(){
  document.getElementById('auction-date').textContent=auction.session_date?'Completed auction '+auction.session_date+' UTC · descriptive, non-predictive':'Completed auction context unavailable';
  const liveSwing=auction.live_intraday_swing||{};
  const currentRange=liveSwing.current_range, priorRange=liveSwing.prior_range;
+ const priorStatus=liveSwing.prior_structure_status||{}, inflection=priorStatus.inflection||{};
  const liveSwingText=currentRange&&priorRange
-  ? 'LIVE INTRADAY SWING VS PRIOR DAY · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
-  : 'LIVE INTRADAY SWING VS PRIOR DAY · '+(liveSwing.label||'Unavailable')+' · Range comparison unavailable';
- document.getElementById('live-swing-vs-prior').textContent=liveSwingText;
+  ? 'LIVE INTRADAY RANGE · '+(liveSwing.label||'Unavailable')+' · Current '+fmt(currentRange.low)+' – '+fmt(currentRange.high)+' vs prior '+fmt(priorRange.low)+' – '+fmt(priorRange.high)+' · '+(liveSwing.completed_candles||0)+' completed candles'
+  : 'LIVE INTRADAY RANGE · '+(liveSwing.label||'Unavailable')+' · Range comparison unavailable';
+ const statusText=(priorStatus.label||'PRIOR STRUCTURE UNAVAILABLE')+(inflection.price_name?' · '+inflection.price_name+' '+fmt(inflection.price)+' · '+inflection.value_name+' '+fmt(inflection.value):'');
+ const liveNode=document.getElementById('live-swing-vs-prior');
+ liveNode.innerHTML='<div>'+liveSwingText+'</div><div class="structure-status '+(priorStatus.status==='BROKEN'?'red':priorStatus.status==='INTACT'?'green':'amber')+'>'+statusText+'</div>';
+
  document.getElementById('subsessions').innerHTML=(auction.subsessions||[]).map((s,i)=>{
   const range=s.range?fmt(s.range.low)+' – '+fmt(s.range.high):'Not started';
   const label=['Asia · 00:00–08:00','Europe · 08:00–13:30','US · 13:30–00:00'][i];
