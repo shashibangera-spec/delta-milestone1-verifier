@@ -1,7 +1,7 @@
 from datetime import datetime, date, timezone, timedelta
 
 from amt_engine.playbook_v14 import build_signal, classify_sub_session, evaluate_exit
-from amt_engine.playbook_v14_shadow_logger import _count_open_events
+from amt_engine.playbook_v14_shadow_logger import _count_open_events, _is_contiguous_30m
 
 
 def candle(open_, high, low, close):
@@ -71,8 +71,10 @@ def test_durable_open_event_cap_survives_exit_and_restart():
     assert _count_open_events(c2,date(2026,11,27),"Asia")==1
     assert "event_type='OPEN'" in c2.cur.query
     assert "playbook_v14_shadow_events" in c2.cur.query
-    assert c2.cur.params[0]==datetime(2026,11,27,0,0,tzinfo=timezone.utc)
-    assert c2.cur.params[1]==datetime(2026,11,27,8,0,tzinfo=timezone.utc)
+    assert c2.cur.params[0]=="2026-11-27"
+    assert c2.cur.params[1]=="Asia"
+    assert c2.cur.params[2]==datetime(2026,11,27,0,0,tzinfo=timezone.utc)
+    assert c2.cur.params[3]==datetime(2026,11,27,8,0,tzinfo=timezone.utc)
 
 
 def test_asia_and_europe_caps_are_independent():
@@ -80,8 +82,10 @@ def test_asia_and_europe_caps_are_independent():
     europe=FakeConn(0)
     assert _count_open_events(asia,date(2026,11,27),"Asia")==1
     assert _count_open_events(europe,date(2026,11,27),"Europe")==0
-    assert europe.cur.params[0]==datetime(2026,11,27,8,0,tzinfo=timezone.utc)
-    assert europe.cur.params[1]==datetime(2026,11,27,13,30,tzinfo=timezone.utc)
+    assert europe.cur.params[0]=="2026-11-27"
+    assert europe.cur.params[1]=="Europe"
+    assert europe.cur.params[2]==datetime(2026,11,27,8,0,tzinfo=timezone.utc)
+    assert europe.cur.params[3]==datetime(2026,11,27,13,30,tzinfo=timezone.utc)
 
 
 def test_shadow_identity_is_v14_and_no_order_execution_imports():
@@ -89,4 +93,21 @@ def test_shadow_identity_is_v14_and_no_order_execution_imports():
     source=Path("amt_engine/playbook_v14_shadow_logger.py").read_text()
     assert '"SHADOW_V1_4"' in source
     assert "exchange.create_order" not in source
+    assert "create_order(" not in source
+
+
+def test_midnight_candle_continuity_and_gap_guard_are_preserved():
+    previous={"candle_time":datetime(2026,11,26,23,30,tzinfo=timezone.utc)}
+    midnight=datetime(2026,11,27,0,0,tzinfo=timezone.utc)
+    assert _is_contiguous_30m(previous,midnight)
+    gap={"candle_time":datetime(2026,11,26,23,0,tzinfo=timezone.utc)}
+    assert not _is_contiguous_30m(gap,midnight)
+
+
+def test_logger_reads_only_completed_candles_and_is_shadow_only():
+    from pathlib import Path
+    source=Path("amt_engine/playbook_v14_shadow_logger.py").read_text()
+    assert "candle_time + interval '30 minutes' <= %s" in source
+    assert '"SHADOW_V1_4"' in source
+    assert 'record_playbook_v14_shadow_event(%s,%s,%s,%s::jsonb)' in source
     assert "create_order(" not in source
