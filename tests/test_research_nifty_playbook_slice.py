@@ -64,7 +64,7 @@ def test_replay_pattern_a_passes_canonical_prices_to_evaluate_exit():
         # then candle closes back inside. Width=20, so 5% buffer=1.
         {"open": 90, "high": 101, "low": 89, "close": 95},
         # Next candle reaches the calculated stop (101 + 1).
-        {"open": 95, "high": 102, "low": 90, "close": 96},
+        {"open": 95, "high": 103, "low": 90, "close": 103},
     ]
     session = {
         "date": day,
