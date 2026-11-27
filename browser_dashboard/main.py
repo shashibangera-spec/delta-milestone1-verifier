@@ -525,7 +525,7 @@ def _calculate_nifty_intraday_value_progression(bars, session_date, now, profile
             expected += 1
 
         profile = profile_calculator(selected) if selected else None
-        value_step = "INITIAL" if first_bracket == 1 else "NOT STARTED"
+        value_step = "INITIAL" if first_bracket == 1 else "UNAVAILABLE"
         if profile is not None and first_bracket > 1 and previous_completed_profile is not None:
             current_levels = (profile["val"], profile["poc"], profile["vah"])
             previous_levels = (
@@ -556,7 +556,7 @@ def _calculate_nifty_intraday_value_progression(bars, session_date, now, profile
         window_end = datetime.combine(
             session_date, datetime.min.time(), tzinfo=ist
         ) + timedelta(minutes=15 + 30 * (last_bracket - 1) + (15 if last_bracket == 13 else 30))
-        if now >= window_end and profile is not None:
+        if now >= window_end and profile is not None and len(selected) == (last_bracket - first_bracket + 1):
             previous_completed_profile = profile
 
     return result
