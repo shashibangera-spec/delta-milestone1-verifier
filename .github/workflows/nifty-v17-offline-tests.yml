@@ -2,7 +2,7 @@ name: Nifty 50 Spot V1.7 offline tests
 on:
   pull_request:
     branches: [main]
-    paths: ["amt_engine/nifty_v17.py","tests/test_nifty_v17.py","browser_dashboard/main.py","browser_dashboard/requirements.txt","browser_dashboard/Dockerfile",".github/workflows/nifty-v17-offline-tests.yml",".github/workflows/nifty-v17-daily.yml"]
+    paths: ["amt_engine/nifty_v17.py","tests/test_nifty_v17.py","scripts/research_nifty_playbook_slice.py","tests/test_research_nifty_playbook_slice.py",".github/workflows/research-nifty-playbook.yml","browser_dashboard/main.py","browser_dashboard/requirements.txt","browser_dashboard/Dockerfile",".github/workflows/nifty-v17-offline-tests.yml",".github/workflows/nifty-v17-daily.yml"]
   push:
     branches: [feat/nifty-spot-v17-phase2]
     paths: ["amt_engine/nifty_v17.py","tests/test_nifty_v17.py","browser_dashboard/main.py","browser_dashboard/requirements.txt","browser_dashboard/Dockerfile",".github/workflows/nifty-v17-offline-tests.yml",".github/workflows/nifty-v17-daily.yml"]
@@ -25,6 +25,6 @@ jobs:
       - name: Compile Nifty engine and dashboard
         run: python -m compileall -q amt_engine/nifty_v17.py browser_dashboard/main.py tests/test_nifty_v17.py
       - name: Run Nifty offline tests
-        run: python -m pytest -q tests/test_nifty_v17.py
+        run: python -m pytest -q tests/test_nifty_v17.py tests/test_research_nifty_playbook_slice.py
       - name: Build browser dashboard image
         run: docker build -f browser_dashboard/Dockerfile -t market-amt-dashboard .
