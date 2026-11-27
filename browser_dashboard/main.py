@@ -363,6 +363,46 @@ def load_overview():
     })
 
 
+def load_nifty_overview():
+    from amt_engine.nifty_v17 import fetch_yahoo, aggregate_session, calculate_profile
+    from zoneinfo import ZoneInfo
+    now = datetime.now(timezone.utc)
+    local_now = now.astimezone(ZoneInfo("Asia/Kolkata"))
+    frame = fetch_yahoo("5d", local_now)
+    day = local_now.date()
+    current_rows = frame[frame["session_date"] == day]
+    bars, diagnostics = aggregate_session(frame, day)
+    prefix = []
+    for bar in bars:
+        if bar["bracket"] != len(prefix) + 1:
+            break
+        prefix.append(bar)
+    developing = calculate_profile(prefix) if prefix else None
+    latest = frame.iloc[-1] if not frame.empty else None
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT session_date,vah,poc,val,session_high,session_low,session_close,
+                                  close_location,value_migration,range_structure,profile_sha256
+                           FROM amt_nifty_v17.sessions ORDER BY session_date DESC LIMIT 1""")
+            prior = cur.fetchone()
+    return _json({"as_of_utc":now,"latest_price":None if latest is None else {
+        "close":float(latest["close"]),"timestamp":latest["timestamp"].to_pydatetime()},
+        "prior":prior,"developing":None if developing is None else {
+        "dvah":developing["vah"],"dpoc":developing["poc"],"dval":developing["val"],"status":"READY"},
+        "progress":f"{len(prefix)}/13","diagnostics":diagnostics,
+        "current_range":None if current_rows.empty else {
+        "high":float(current_rows["high"].max()),"low":float(current_rows["low"].min())},
+        "prior_range":None if prior is None else {
+        "high":float(prior["session_high"]),"low":float(prior["session_low"])}})
+
+
+@app.get("/api/nifty-overview")
+def nifty_overview(_username: str = Depends(require_dashboard_auth)):
+    try:
+        return JSONResponse(load_nifty_overview())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Nifty data unavailable: {type(exc).__name__}") from exc
+
 @app.get("/", response_class=HTMLResponse)
 def index(_username: str = Depends(require_dashboard_auth)):
     return HTML
@@ -390,7 +430,7 @@ HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BTC | V1.7 + Playbook V1.3</title>
+<title>BTCUSD | NIFTY 50 Spot · AMT Dashboard</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1018;--panel:#121b28;--line:#243247;--muted:#93a4b8;--text:#e8eef7;--cyan:#58c7dc;--green:#52d6a1;--red:#ff7b86;--amber:#f2c66d}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif}
@@ -406,11 +446,26 @@ table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;p
 .scroll{overflow-x:auto}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:11px}
 .green{color:var(--green)}.red{color:var(--red)}.amber{color:var(--amber)}.cyan{color:var(--cyan)}
 footer{margin-top:18px;color:var(--muted);font-size:11px}
+.tabbar{display:flex;gap:8px;margin:0 0 16px}.tab{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 16px;border-radius:9px;font-weight:650;cursor:pointer}.tab.active{color:var(--text);border-color:var(--cyan);box-shadow:inset 0 -2px var(--cyan)}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){main{padding:12px}.grid{grid-template-columns:1fr 1fr}.metric{font-size:19px}.levels{grid-template-columns:1fr}}
 </style></head>
 <body><main>
-<header><div><h1>BTC / V1.7 AMT + PLAYBOOK V1.3</h1><div class="muted">Read-only market structure and shadow observation</div></div><div class="stamp" id="asof">Loading…</div></header>
+<header><div><h1>MARKET AMT DASHBOARD</h1><div class="muted">Read-only market structure and observation</div></div><div class="stamp" id="asof">Loading…</div></header>
+<nav class="tabbar" aria-label="Market dashboard"><button id="tab-btc" class="tab active" type="button">BTCUSD</button><button id="tab-nifty" class="tab" type="button">NIFTY 50 SPOT</button></nav>
+<section id="nifty-view" class="section" hidden>
+<section class="grid">
+<div class="panel"><h2>Latest NIFTY 50 Spot</h2><div class="metric" id="nifty-price">—</div><div class="sub" id="nifty-price-time">Completed 15m Yahoo candle</div></div>
+<div class="panel"><h2>Prior Session Close Location</h2><div class="metric" id="nifty-close-location">—</div><div class="sub" id="nifty-session-date">—</div></div>
+<div class="panel"><h2>Value Migration</h2><div class="metric" id="nifty-migration">—</div><div class="sub">Prior completed auction</div></div>
+<div class="panel"><h2>Range Structure</h2><div class="metric" id="nifty-range-structure">—</div><div class="sub">Compared with previous completed session</div></div>
+</section>
+<section class="panel section"><h2>Prior Completed Session · VAH / POC / VAL</h2><div class="levels"><div class="level"><small>VAH</small><b id="nifty-vah">—</b></div><div class="level"><small>POC</small><b id="nifty-poc">—</b></div><div class="level"><small>VAL</small><b id="nifty-val">—</b></div></div></section>
+<section class="panel section"><h2>Live Developing Value · <span id="nifty-progress">0/13</span> completed brackets</h2><div class="levels"><div class="level"><small>dVAH</small><b id="nifty-dvah">—</b></div><div class="level"><small>dPOC</small><b id="nifty-dpoc">—</b></div><div class="level"><div><small>dVAL</small><b id="nifty-dval">—</b></div></div></div><div class="sub" id="nifty-developing-status">Completed 15m Yahoo candles only.</div></section>
+<section class="panel section"><h2>Live Intraday Range vs. Prior Day</h2><div class="levels"><div class="level"><small>Current High</small><b id="nifty-current-high">—</b></div><div class="level"><small>Current Low</small><b id="nifty-current-low">—</b></div><div class="level"><small>Prior Range</small><b id="nifty-prior-range">—</b></div></div><div class="sub" id="nifty-range-status">Read-only completed 15m Yahoo range comparison.</div></section>
+<footer>NIFTY 50 Spot · Yahoo Finance ^NSEI · 10-point TPO rows · 70% value area · 09:15–15:30 IST. No OI or BTC data dependency.</footer>
+</section>
+<div id="btc-view">
 <section class="grid">
  <div class="panel"><h2>Latest BTC price</h2><div class="metric" id="price">—</div><div class="sub" id="price-time">—</div></div>
  <div class="panel"><h2>Causal discovery</h2><div class="metric" id="discovery">—</div><div class="sub">Completed 30m closes only</div></div>
@@ -452,8 +507,36 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 </section>
 <footer>Research-only. No order routing, alerts, or execution. Developing values show persisted candle-by-candle V1.7 snapshots; live price and causal state use the latest available completed source candles. Refreshes every 10 seconds.</footer>
+</div><!-- /btc-view -->
 </main>
 <script>
+let activeMarket='btc';
+function selectMarket(market){
+ activeMarket=market;
+ document.getElementById('btc-view').hidden=market!=='btc';
+ document.getElementById('nifty-view').hidden=market!=='nifty';
+ document.getElementById('tab-btc').classList.toggle('active',market==='btc');
+ document.getElementById('tab-nifty').classList.toggle('active',market==='nifty');
+ if(market==='nifty')refreshNifty().catch(e=>{document.getElementById('nifty-developing-status').textContent='Nifty data unavailable: '+e.message});
+}
+async function refreshNifty(){
+ const r=await fetch('/api/nifty-overview',{cache:'no-store'});if(!r.ok)throw new Error('API '+r.status);
+ const d=await r.json(),p=d.prior||{},v=d.developing||{},cr=d.current_range||{},pr=d.prior_range||{},px=d.latest_price||{};
+ document.getElementById('nifty-price').textContent=fmt(px.close);
+ document.getElementById('nifty-price-time').textContent=px.timestamp?'Completed 15m candle · '+new Date(px.timestamp).toISOString().slice(0,16)+' UTC':'No completed Yahoo candle';
+ document.getElementById('nifty-session-date').textContent=p.session_date?'Session '+p.session_date:'No persisted completed session';
+ document.getElementById('nifty-close-location').textContent=p.close_location||'—';
+ document.getElementById('nifty-migration').textContent=p.value_migration||'—';
+ document.getElementById('nifty-range-structure').textContent=p.range_structure||'—';
+ document.getElementById('nifty-vah').textContent=fmt(p.vah);document.getElementById('nifty-poc').textContent=fmt(p.poc);document.getElementById('nifty-val').textContent=fmt(p.val);
+ document.getElementById('nifty-progress').textContent=d.progress||'0/13';
+ document.getElementById('nifty-dvah').textContent=fmt(v.dvah);document.getElementById('nifty-dpoc').textContent=fmt(v.dpoc);document.getElementById('nifty-dval').textContent=fmt(v.dval);
+ document.getElementById('nifty-developing-status').textContent=v.status==='READY'?'Computed from '+d.progress+' completed brackets; informational only.':'No contiguous completed bracket prefix yet.';
+ document.getElementById('nifty-current-high').textContent=fmt(cr.high);document.getElementById('nifty-current-low').textContent=fmt(cr.low);
+ document.getElementById('nifty-prior-range').textContent=pr.high===undefined?'—':fmt(pr.low)+' – '+fmt(pr.high);
+ document.getElementById('nifty-range-status').textContent=cr.high===undefined?'Current completed-candle range unavailable.':'Current completed-candle range '+fmt(cr.low)+' – '+fmt(cr.high)+(pr.high===undefined?'':' vs prior '+fmt(pr.low)+' – '+fmt(pr.high));
+}
+
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
 const cls=v=>String(v||'').includes('ABOVE')||v==='EXPANSION'?'green':String(v||'').includes('BELOW')||v==='CONTRACTION_OR_FLAT'?'red':'amber';
 async function refresh(){
@@ -492,5 +575,5 @@ async function refresh(){
  const totals=sh.totals||{};document.getElementById('shadow-r').textContent=Number(totals.realized_r||0).toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+(totals.open_trades||0)+' open · '+(totals.total_trades||0)+' total trades';
  document.getElementById('trades').innerHTML=trades.length?trades.map(t=>'<tr><td>'+t.session_date+'</td><td>'+t.pattern+'</td><td>'+t.side+'</td><td>'+t.status+'</td><td>'+fmt(t.entry_price)+'</td><td>'+fmt(t.stop_price)+'</td><td>'+fmt(t.target_price)+'</td><td>'+t.discovery_state+'</td><td>'+t.oi_class+'</td><td>'+ (t.exit_reason||'—')+'</td><td>'+ (t.realized_r===null?'—':Number(t.realized_r).toFixed(2)+'R')+'</td></tr>').join(''):'<tr><td colspan="11">No shadow trades logged yet</td></tr>';
 }
-refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});setInterval(()=>refresh().catch(()=>{}),10000);
+document.getElementById('tab-btc').addEventListener('click',()=>selectMarket('btc'));document.getElementById('tab-nifty').addEventListener('click',()=>selectMarket('nifty'));refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});setInterval(()=>{if(activeMarket==='btc')refresh().catch(()=>{});else refreshNifty().catch(()=>{});},10000);
 </script></body></html>"""
