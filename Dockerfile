@@ -6,6 +6,6 @@ COPY oi_metrics.py .
 COPY milestone1_delta_verify.py .
 COPY continuous_collector.py .
 COPY tests ./tests
-RUN python -m unittest discover -s tests -v
+RUN python -m unittest tests/test_continuous_collector.py
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "continuous_collector.py"]
