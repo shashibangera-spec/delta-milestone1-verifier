@@ -62,7 +62,7 @@ def read_candles(conn):
 
 def read_profiles(conn):
     with conn.cursor() as q:
-        q.execute("""SELECT session_date,profile_status,is_complete,expected_bars,observed_bars,vah_upper,val_lower FROM amt_engine_v17.session_profiles
+        q.execute("""SELECT session_date,profile_status,is_complete,expected_bars,observed_bars,vah_upper,poc_lower,poc_upper,val_lower FROM amt_engine_v17.session_profiles
           WHERE method_version='AMT_ENGINE_V1.7' AND source=%s AND symbol=%s AND session_date BETWEEN %s AND %s ORDER BY session_date""",(SOURCE,SYMBOL,START,END))
         rows=q.fetchall()
     bydate={r["session_date"]:r for r in rows}
@@ -159,6 +159,7 @@ def test_a(daybars,daily_profiles,blocks):
     flat=sorted((b for day in daybars.values() for b in day),key=lambda x:x["candle_time"]); idx={b["candle_time"]:i for i,b in enumerate(flat)}
     trades=[]; unresolved=0; signal_count=0
     for d in session_dates()[1:]:
+        if d not in daily_profiles or d-timedelta(days=1) not in daily_profiles: continue
         prevprof=daily_profiles[d-timedelta(days=1)]; vah=float(prevprof.vah_upper); val=float(prevprof.val_lower)
         for name in ("Asia","Europe"):
             bars=blocks[d][name]["bars"]; regime=blocks[d][name]["regime"]
@@ -180,6 +181,7 @@ def test_b(daybars,blocks,eligible_dates):
     flat=sorted((b for day in daybars.values() for b in day),key=lambda x:x["candle_time"]); idx={b["candle_time"]:i for i,b in enumerate(flat)}
     events=[]; controls=[]; unresolved=0
     for d in session_dates():
+        if d not in eligible_dates: continue
         prior_name="Prior US Overnight"
         for name in ("Asia","Europe","US Cash"):
             cur=blocks[d][name]; prev=blocks[d][prior_name]; bars=cur["bars"]; pp=prev["profile"]; cp=cur["profile"]
@@ -219,8 +221,9 @@ def run():
     with connect_ro(target,TARGET_HOST,"V1.7 production profile branch") as tc, connect_ro(source,SOURCE_HOST,"Delta source candle branch") as sc:
         dbprofiles,skipped_profiles=read_profiles(tc); candles=read_candles(sc)
     daily,daybars=validate_days(candles)
-    for d,p in daily.items():
-        dbp=dbprofiles[d]
+    eligible_dates=set(dbprofiles)
+    for d in eligible_dates:
+        p=daily[d]; dbp=dbprofiles[d]
         if Decimal(str(p.vah_upper))!=Decimal(str(dbp["vah_upper"])) or Decimal(str(p.val_lower))!=Decimal(str(dbp["val_lower"])):
             raise AuditError(f"{d}: canonical daily.py VAH/VAL does not match persisted V1.7 profile")
     eligible_daily={d:daily[d] for d in eligible_dates}\n    blocks=build_blocks(daybars); a=test_a(daybars,eligible_daily,blocks); b=test_b(daybars,blocks,eligible_dates)
