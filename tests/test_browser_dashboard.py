@@ -430,3 +430,4 @@ def test_dashboard_refresh_pauses_when_hidden_and_resumes_immediately():
     assert "refreshActiveMarket();" in HTML
     assert "setInterval(refreshActiveMarket,REFRESH_INTERVAL_MS)" in HTML
     assert "},10000)" not in HTML
+    assert "if(!document.hidden)refresh()" in HTML
