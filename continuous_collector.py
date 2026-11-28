@@ -385,14 +385,18 @@ def retry_deadline_for(now):
 
 
 def latest_pair_covers(conn, expected_slot):
-    latest = existing_latest(conn)
-    price = latest.get("PRICE")
-    oi = latest.get("OI")
-    return bool(
-        price is not None and oi is not None
-        and int(price.timestamp()) >= expected_slot
-        and int(oi.timestamp()) >= expected_slot
-    )
+    """Require the exact expected candle timestamp in both persisted series."""
+    candle_time = datetime.fromtimestamp(expected_slot, timezone.utc)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(DISTINCT series_type)
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m'
+              AND candle_time=%s
+              AND ((series_type='PRICE' AND symbol='BTCUSD')
+                OR (series_type='OI' AND symbol='OI:BTCUSD'))
+        """, (candle_time,))
+        return cur.fetchone()[0] == 2
 
 
 def main():
