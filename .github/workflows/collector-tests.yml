@@ -9,6 +9,7 @@ on:
       - "browser_dashboard/**"
       - "tests/**"
       - "requirements.txt"
+      - "Dockerfile"
       - ".github/workflows/collector-tests.yml"
   push:
     branches: [fix/immutable-neon-historical-baseline]
