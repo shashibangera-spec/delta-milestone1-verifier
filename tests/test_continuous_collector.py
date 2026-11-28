@@ -169,6 +169,16 @@ if __name__ == "__main__":
 
 
 
+    def test_process_cycle_uses_named_dict_row_for_new_confirmed_count(self):
+        import inspect
+        import continuous_collector
+
+        source = inspect.getsource(continuous_collector.process_cycle)
+        self.assertIn('AS new_confirmed_count', source)
+        self.assertIn('["new_confirmed_count"]', source)
+        self.assertNotIn('fetchone()[0]', source)
+
+
 class CollectorPairPersistenceTests(unittest.TestCase):
     class FakeCursor:
         def __init__(self, pair_count):
