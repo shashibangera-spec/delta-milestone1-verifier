@@ -187,7 +187,7 @@ class CollectorPairPersistenceTests(unittest.TestCase):
             self.params = params
 
         def fetchone(self):
-            return (self.pair_count,)
+            return {"paired_series_count": self.pair_count}
 
     class FakeConnection:
         def __init__(self, pair_count):

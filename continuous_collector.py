@@ -403,14 +403,14 @@ def latest_pair_covers(conn, expected_slot):
     candle_time = datetime.fromtimestamp(expected_slot, timezone.utc)
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT COUNT(DISTINCT series_type)
+            SELECT COUNT(DISTINCT series_type) AS paired_series_count
             FROM research.delta_candles
             WHERE source='delta_india' AND resolution='30m'
               AND candle_time=%s
               AND ((series_type='PRICE' AND symbol='BTCUSD')
                 OR (series_type='OI' AND symbol='OI:BTCUSD'))
         """, (candle_time,))
-        return cur.fetchone()[0] == 2
+        return cur.fetchone()["paired_series_count"] == 2
 
 
 def main():
