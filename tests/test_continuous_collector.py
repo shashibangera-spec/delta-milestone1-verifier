@@ -211,3 +211,12 @@ class CollectorPairPersistenceTests(unittest.TestCase):
         expected = int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp())
         self.assertFalse(latest_pair_covers(self.FakeConnection(1), expected))
         self.assertFalse(latest_pair_covers(self.FakeConnection(0), expected))
+
+
+def test_options_collection_failure_is_isolated_from_core_cycle():
+    import continuous_collector
+
+    def fail(_database_url):
+        raise RuntimeError("simulated options API outage")
+
+    assert continuous_collector.collect_options_safely("postgresql://unused", collector=fail) is False
