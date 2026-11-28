@@ -6,7 +6,7 @@ import signal
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 from psycopg.rows import dict_row
@@ -16,7 +16,8 @@ PRICE_SYMBOL = "BTCUSD"
 OI_SYMBOL = "OI:BTCUSD"
 RESOLUTION = "30m"
 SLOT_SECONDS = 1800
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
+RETRY_SECONDS = int(os.getenv("RETRY_SECONDS", "15"))
+MAX_RETRY_SECONDS = int(os.getenv("MAX_RETRY_SECONDS", "270"))
 FINALIZATION_GRACE_SECONDS = int(os.getenv("FINALIZATION_GRACE_SECONDS", "15"))
 LOOKBACK_SECONDS = 3 * 24 * 3600
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -344,34 +345,136 @@ def process_cycle(conn,baseline,first_write_verified):
             first_write_verified=True
     return first_write_verified
 
+def next_scheduled_wake(now):
+    """Return the next strictly-future UTC :02 or :32 half-hour wake."""
+    now = now.astimezone(timezone.utc)
+    if now.minute < 2:
+        target_minute = 2
+        target_hour = now.hour
+        target_day = now.date()
+    elif now.minute < 32:
+        target_minute = 32
+        target_hour = now.hour
+        target_day = now.date()
+    else:
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        target_minute = 2
+        target_hour = next_hour.hour
+        target_day = next_hour.date()
+    return datetime.combine(
+        target_day, datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=target_hour, minute=target_minute)
+
+
+def expected_latest_candle_open(now):
+    """Latest fully closed 30m candle's UTC open timestamp."""
+    epoch = int(now.timestamp())
+    return epoch // SLOT_SECONDS * SLOT_SECONDS - SLOT_SECONDS
+
+
+def retry_deadline_for(now):
+    """Retry only inside the :02/:32 collection window, stopping before :07/:37."""
+    now = now.astimezone(timezone.utc)
+    if 2 <= now.minute < 7:
+        deadline = now.replace(minute=6, second=30, microsecond=0)
+    elif 32 <= now.minute < 37:
+        deadline = now.replace(minute=36, second=30, microsecond=0)
+    else:
+        return now
+    return deadline
+
+
+def latest_pair_covers(conn, expected_slot):
+    """Require the exact expected candle timestamp in both persisted series."""
+    candle_time = datetime.fromtimestamp(expected_slot, timezone.utc)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(DISTINCT series_type)
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m'
+              AND candle_time=%s
+              AND ((series_type='PRICE' AND symbol='BTCUSD')
+                OR (series_type='OI' AND symbol='OI:BTCUSD'))
+        """, (candle_time,))
+        return cur.fetchone()[0] == 2
+
+
 def main():
-    if not DATABASE_URL.startswith(("postgresql://","postgres://")): raise RuntimeError("DATABASE_URL must be PostgreSQL URL")
-    with psycopg.connect(DATABASE_URL,connect_timeout=20,row_factory=dict_row) as conn:
+    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("DATABASE_URL must be PostgreSQL URL")
+    configured_branch = os.getenv("NEON_BRANCH_ID")
+    if configured_branch != EXPECTED_NEON_BRANCH_ID:
+        raise RuntimeError(f"Refusing writes: NEON_BRANCH_ID must equal {EXPECTED_NEON_BRANCH_ID}")
+
+    # Initialize and verify the immutable baseline once; no DB connection is held while sleeping.
+    with psycopg.connect(DATABASE_URL, connect_timeout=20, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT current_database() AS db,current_schema() AS schema")
-            identity=cur.fetchone()
-        if identity["db"]!="amt_research": raise RuntimeError(f"Refusing writes: unexpected database {identity['db']}")
-        configured_branch=os.getenv("NEON_BRANCH_ID")
-        if configured_branch!=EXPECTED_NEON_BRANCH_ID:
-            raise RuntimeError(f"Refusing writes: NEON_BRANCH_ID must equal {EXPECTED_NEON_BRANCH_ID}")
+            identity = cur.fetchone()
+        if identity["db"] != "amt_research":
+            raise RuntimeError(f"Refusing writes: unexpected database {identity['db']}")
         create_provisional_table(conn)
-        baseline=baseline_snapshot(conn)
-        log("collector_started",database=identity["db"],neon_branch_id=os.getenv("NEON_BRANCH_ID"),
-            expected_baseline={"PRICE":EXPECTED_PRICE_ROWS,"OI":EXPECTED_OI_ROWS,"amt_30m_features":EXPECTED_FEATURE_ROWS},
-            baseline_max_utc=baseline["baseline_max"],poll_seconds=POLL_SECONDS)
-        first_write_verified=False
-        while not STOP:
-            started=time.time()
-            try:
-                first_write_verified=process_cycle(conn,baseline,first_write_verified)
-            except Exception as exc:
-                conn.rollback()
-                log("cycle_error",error=str(exc)[:1000])
-            sleep_for=max(1,POLL_SECONDS-(time.time()-started))
-            for _ in range(int(sleep_for)):
-                if STOP: break
-                time.sleep(1)
-        log("collector_stopped",first_write_verified=first_write_verified)
+        baseline = baseline_snapshot(conn)
 
-if __name__=="__main__":
+    log("collector_started", database="amt_research", neon_branch_id=configured_branch,
+        expected_baseline={"PRICE": EXPECTED_PRICE_ROWS, "OI": EXPECTED_OI_ROWS,
+                           "amt_30m_features": EXPECTED_FEATURE_ROWS},
+        baseline_max_utc=baseline["baseline_max"], schedule_utc=":02/:32",
+        retry_seconds=RETRY_SECONDS, max_retry_seconds=MAX_RETRY_SECONDS,
+        finalization_grace_seconds=FINALIZATION_GRACE_SECONDS)
+
+    first_write_verified = False
+    while not STOP:
+        cycle_started = datetime.now(timezone.utc)
+        expected_slot = expected_latest_candle_open(cycle_started)
+        retry_deadline = retry_deadline_for(cycle_started)
+        attempt = 0
+
+        while not STOP:
+            attempt += 1
+            try:
+                # Each attempt releases its connection; Neon can autosuspend between cycles.
+                with psycopg.connect(DATABASE_URL, connect_timeout=20, row_factory=dict_row) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT current_database() AS db")
+                        current_db = cur.fetchone()["db"]
+                    if current_db != "amt_research":
+                        raise RuntimeError(f"Refusing writes: unexpected database {current_db}")
+                    first_write_verified = process_cycle(conn, baseline, first_write_verified)
+                    pair_ready = latest_pair_covers(conn, expected_slot)
+                if pair_ready:
+                    log("scheduled_candle_pair_ready", attempt=attempt,
+                        expected_candle_open_utc=datetime.fromtimestamp(
+                            expected_slot, timezone.utc
+                        ).isoformat())
+                    break
+                log("scheduled_candle_pair_not_ready", attempt=attempt,
+                    expected_candle_open_utc=datetime.fromtimestamp(
+                        expected_slot, timezone.utc
+                    ).isoformat())
+            except Exception as exc:
+                log("cycle_error", attempt=attempt, error=str(exc)[:1000])
+
+            if datetime.now(timezone.utc) >= retry_deadline:
+                log("collector_retry_deadline_missed", expected_candle_open_utc=
+                    datetime.fromtimestamp(expected_slot, timezone.utc).isoformat())
+                break
+            time.sleep(min(RETRY_SECONDS, max(
+                1, (retry_deadline - datetime.now(timezone.utc)).total_seconds()
+            )))
+
+        if STOP:
+            break
+        wake_at = next_scheduled_wake(datetime.now(timezone.utc))
+        log("collector_sleeping_until", next_wake_utc=wake_at.isoformat())
+        while not STOP:
+            remaining = (wake_at - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                break
+            time.sleep(min(1, remaining))
+
+    log("collector_stopped", first_write_verified=first_write_verified)
+
+
+if __name__ == "__main__":
     main()

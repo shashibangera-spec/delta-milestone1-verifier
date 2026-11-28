@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import time
 import secrets
+import threading
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 from decimal import Decimal
@@ -27,7 +28,21 @@ EXPECTED_ROLE = "amt_dashboard_ro"
 
 app = FastAPI(title="BTC V1.7 / Playbook V1.4 Observation Dashboard")
 security = HTTPBasic()
-_cache = {"at": 0.0, "data": None}
+OVERVIEW_CACHE_TTL_SECONDS = 45
+_response_cache = {}
+_response_cache_lock = threading.Lock()
+
+
+def _cached_json(cache_key, loader):
+    """Return a per-endpoint in-memory response cache without duplicate DB refreshes."""
+    with _response_cache_lock:
+        now = time.monotonic()
+        cached = _response_cache.get(cache_key)
+        if cached is not None and now - cached["at"] < OVERVIEW_CACHE_TTL_SECONDS:
+            return JSONResponse(cached["data"])
+        data = loader()
+        _response_cache[cache_key] = {"at": time.monotonic(), "data": data}
+        return JSONResponse(data)
 
 
 def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(security)):
@@ -621,7 +636,7 @@ def load_nifty_overview():
 @app.get("/api/nifty-overview")
 def nifty_overview(_username: str = Depends(require_dashboard_auth)):
     try:
-        return JSONResponse(load_nifty_overview())
+        return _cached_json("nifty", load_nifty_overview)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Nifty data unavailable: {type(exc).__name__}") from exc
 
@@ -637,13 +652,8 @@ def health():
 
 @app.get("/api/overview")
 def overview(_username: str = Depends(require_dashboard_auth)):
-    now = time.monotonic()
-    if _cache["data"] is not None and now - _cache["at"] < 10:
-        return JSONResponse(_cache["data"])
     try:
-        data = load_overview()
-        _cache.update({"at": now, "data": data})
-        return JSONResponse(data)
+        return _cached_json("btc", load_overview)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Dashboard data unavailable: {type(exc).__name__}") from exc
 
@@ -735,7 +745,7 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
 <section class="panel section"><h2>Playbook v1.4 · SHADOW_V1_4 — active and recent shadow trades</h2>
  <div class="scroll"><table><thead><tr><th>Session</th><th>Pattern</th><th>Side</th><th>Status</th><th>Entry</th><th>Stop</th><th>Target</th><th>Discovery</th><th>OI class</th><th>Exit</th><th>R</th></tr></thead><tbody id="trades"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 </section>
-<footer>Research-only. No order routing, alerts, or execution. Developing values show persisted candle-by-candle V1.7 snapshots; live price and causal state use the latest available completed source candles. Refreshes every 10 seconds.</footer>
+<footer>Research-only. No order routing, alerts, or execution. Developing values show persisted candle-by-candle V1.7 snapshots; live price and causal state use the latest available completed source candles. Refreshes every 60 seconds while this browser tab is visible.</footer>
 </div><!-- /btc-view -->
 </main>
 <script>
@@ -822,5 +832,27 @@ async function refresh(){
  const totals=sh.totals||{};document.getElementById('shadow-r').textContent=Number(totals.realized_r||0).toFixed(2)+'R';document.getElementById('shadow-state').textContent+=' · '+(totals.open_trades||0)+' open · '+(totals.total_trades||0)+' total trades';
  document.getElementById('trades').innerHTML=trades.length?trades.map(t=>'<tr><td>'+t.session_date+'</td><td>'+t.pattern+'</td><td>'+t.side+'</td><td>'+t.status+'</td><td>'+fmt(t.entry_price)+'</td><td>'+fmt(t.stop_price)+'</td><td>'+fmt(t.target_price)+'</td><td>'+t.discovery_state+'</td><td>'+t.oi_class+'</td><td>'+ (t.exit_reason||'—')+'</td><td>'+ (t.realized_r===null?'—':Number(t.realized_r).toFixed(2)+'R')+'</td></tr>').join(''):'<tr><td colspan="11">No shadow trades logged yet</td></tr>';
 }
-document.getElementById('tab-btc').addEventListener('click',()=>selectMarket('btc'));document.getElementById('tab-nifty').addEventListener('click',()=>selectMarket('nifty'));refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});setInterval(()=>{if(activeMarket==='btc')refresh().catch(()=>{});else refreshNifty().catch(()=>{});},10000);
+document.getElementById('tab-btc').addEventListener('click',()=>selectMarket('btc'));document.getElementById('tab-nifty').addEventListener('click',()=>selectMarket('nifty'));
+const REFRESH_INTERVAL_MS=60000;
+let refreshTimer=null;
+function refreshActiveMarket(){
+ if(document.hidden)return;
+ if(activeMarket==='btc')refresh().catch(()=>{});
+ else refreshNifty().catch(()=>{});
+}
+function stopRefreshTimer(){
+ if(refreshTimer!==null){clearInterval(refreshTimer);refreshTimer=null;}
+}
+function startRefreshTimer(){
+ stopRefreshTimer();
+ if(document.hidden)return;
+ refreshTimer=setInterval(refreshActiveMarket,REFRESH_INTERVAL_MS);
+}
+if(!document.hidden)refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});
+startRefreshTimer();
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden){stopRefreshTimer();return;}
+ refreshActiveMarket();
+ startRefreshTimer();
+});
 </script></body></html>"""

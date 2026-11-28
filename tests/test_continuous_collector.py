@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 
 from continuous_collector import (
     SLOT_SECONDS,
+    next_scheduled_wake,
+    expected_latest_candle_open,
+    retry_deadline_for,
     EXPECTED_PRICE_ROWS,
     EXPECTED_OI_ROWS,
     EXPECTED_FEATURE_ROWS,
@@ -38,6 +41,42 @@ class CollectorSafetyTests(unittest.TestCase):
 
     def test_grid_is_thirty_minutes(self):
         self.assertEqual(SLOT_SECONDS, 1800)
+
+    def test_collector_wakes_at_next_utc_02_or_32_boundary(self):
+        cases = [
+            (datetime(2026, 11, 28, 0, 1, 59, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 31, 59, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc), datetime(2026, 11, 28, 1, 2, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 23, 40, tzinfo=timezone.utc), datetime(2026, 11, 29, 0, 2, tzinfo=timezone.utc)),
+        ]
+        for now, expected in cases:
+            with self.subTest(now=now):
+                self.assertEqual(next_scheduled_wake(now), expected)
+
+    def test_expected_latest_candle_is_last_fully_closed_slot(self):
+        self.assertEqual(
+            expected_latest_candle_open(datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            int(datetime(2026, 11, 27, 23, 30, tzinfo=timezone.utc).timestamp()),
+        )
+        self.assertEqual(
+            expected_latest_candle_open(datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+    def test_collector_retries_stop_before_playbook_run(self):
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 6, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 36, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 7, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 7, tzinfo=timezone.utc),
+        )
 
     def test_original_baseline_constants_remain_fixed(self):
         self.assertEqual(EXPECTED_PRICE_ROWS, 8641)
@@ -127,3 +166,48 @@ class CollectorSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class CollectorPairPersistenceTests(unittest.TestCase):
+    class FakeCursor:
+        def __init__(self, pair_count):
+            self.pair_count = pair_count
+            self.sql = None
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchone(self):
+            return (self.pair_count,)
+
+    class FakeConnection:
+        def __init__(self, pair_count):
+            self.fake_cursor = CollectorPairPersistenceTests.FakeCursor(pair_count)
+
+        def cursor(self):
+            return self.fake_cursor
+
+    def test_candle_pair_ready_requires_exact_price_and_oi_timestamp(self):
+        from continuous_collector import latest_pair_covers
+
+        expected = int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp())
+        conn = self.FakeConnection(2)
+        self.assertTrue(latest_pair_covers(conn, expected))
+        self.assertIn("COUNT(DISTINCT series_type)", conn.fake_cursor.sql)
+        self.assertEqual(conn.fake_cursor.params[0], datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc))
+
+    def test_candle_pair_not_ready_when_either_series_is_missing(self):
+        from continuous_collector import latest_pair_covers
+
+        expected = int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertFalse(latest_pair_covers(self.FakeConnection(1), expected))
+        self.assertFalse(latest_pair_covers(self.FakeConnection(0), expected))

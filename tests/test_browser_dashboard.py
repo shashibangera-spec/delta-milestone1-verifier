@@ -392,3 +392,42 @@ def test_nifty_intraday_value_progression_excludes_uncompleted_and_breaks_on_gap
     assert result[1]["candles"] == 5
     assert result[1]["value_step"] == "UNAVAILABLE"
     assert result[2]["candles"] == 0
+
+
+def test_overview_cache_is_per_endpoint_and_expires_after_45_seconds(monkeypatch):
+    import browser_dashboard.main as dashboard
+
+    dashboard._response_cache.clear()
+    clock = {"now": 100.0}
+    calls = {"btc": 0, "nifty": 0}
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(dashboard, "load_overview", lambda: calls.__setitem__("btc", calls["btc"] + 1) or {"source": "btc"})
+    monkeypatch.setattr(dashboard, "load_nifty_overview", lambda: calls.__setitem__("nifty", calls["nifty"] + 1) or {"source": "nifty"})
+
+    assert dashboard.overview("observer").body == b'{"source":"btc"}'
+    assert dashboard.overview("observer").body == b'{"source":"btc"}'
+    assert dashboard.nifty_overview("observer").body == b'{"source":"nifty"}'
+    assert calls == {"btc": 1, "nifty": 1}
+
+    clock["now"] = 144.9
+    dashboard.overview("observer")
+    dashboard.nifty_overview("observer")
+    assert calls == {"btc": 1, "nifty": 1}
+
+    clock["now"] = 145.0
+    dashboard.overview("observer")
+    dashboard.nifty_overview("observer")
+    assert calls == {"btc": 2, "nifty": 2}
+    dashboard._response_cache.clear()
+
+
+def test_dashboard_refresh_pauses_when_hidden_and_resumes_immediately():
+    from browser_dashboard.main import HTML
+
+    assert "const REFRESH_INTERVAL_MS=60000" in HTML
+    assert "document.addEventListener('visibilitychange'" in HTML
+    assert "if(document.hidden){stopRefreshTimer();return;}" in HTML
+    assert "refreshActiveMarket();" in HTML
+    assert "setInterval(refreshActiveMarket,REFRESH_INTERVAL_MS)" in HTML
+    assert "},10000)" not in HTML
+    assert "if(!document.hidden)refresh()" in HTML
