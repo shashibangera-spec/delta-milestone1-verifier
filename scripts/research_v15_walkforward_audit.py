@@ -80,32 +80,34 @@ def test_a_replay(daily,blocks,oi,flat):
     idx={b["candle_time"]:i for i,b in enumerate(flat)}; output={}
     variants=("BASELINE","FILTER_1_NO_STEPPED_DOWN","FILTER_2_NO_STEPPED_DOWN_OR_OI_EXPANSION")
     for variant in variants:
-        trades=[]; unresolved=signals=0
-        for d in base.evaluation_dates():
-            split=split_for_day(d)
-            if not split or d not in daily or d-timedelta(days=1) not in daily: continue
-            prior=daily[d-timedelta(days=1)]; vah=float(prior.vah_upper); val=float(prior.val_lower)
-            for name in ("Asia","Europe"):
-                session=blocks[d][name]; regime=session["regime"]
-                if not session["bars"] or regime=="UNAVAILABLE": continue
-                if variant!="BASELINE" and regime=="VALUE STEPPED DOWN": continue
-                for bar in session["bars"]:
-                    ts=bar["candle_time"]; i=idx[ts]
-                    prev=flat[i-1] if i else None
-                    if prev is None: continue
-                    sig=build_signal({"close":prev["close"]},bar,vah,val)
-                    if sig is None or sig.pattern!="A": continue
-                    signals+=1; delta=oi[ts]["delta"]
-                    if variant=="FILTER_2_NO_STEPPED_DOWN_OR_OI_EXPANSION" and delta>0:
-                        continue
-                    result=bounded_exit(ts,sig.side,sig.entry_price,sig.stop_price,sig.target_price,flat,idx,split)
-                    if result is None: unresolved+=1
-                    else: trades.append({**result,"regime":regime,"sub_session":name,"oi_delta":delta})
-                    break
-        output[variant]={"metrics":summarize(trades),"signals_considered":signals,
-            "unresolved_or_censored":unresolved,
-            "oi_expansion_entries":sum(x["oi_delta"]>0 for x in trades),
-            "oi_flat_or_contraction_entries":sum(x["oi_delta"]<=0 for x in trades)}
+        output[variant]={}
+        for requested_split in ("IN_SAMPLE","BLIND_OUT_OF_SAMPLE"):
+            trades=[]; unresolved=signals=0
+            for d in base.evaluation_dates():
+                split=split_for_day(d)
+                if split!=requested_split or d not in daily or d-timedelta(days=1) not in daily: continue
+                prior=daily[d-timedelta(days=1)]; vah=float(prior.vah_upper); val=float(prior.val_lower)
+                for name in ("Asia","Europe"):
+                    session=blocks[d][name]; regime=session["regime"]
+                    if not session["bars"] or regime=="UNAVAILABLE": continue
+                    if variant!="BASELINE" and regime=="VALUE STEPPED DOWN": continue
+                    for bar in session["bars"]:
+                        ts=bar["candle_time"]; i=idx[ts]
+                        prev=flat[i-1] if i else None
+                        if prev is None: continue
+                        sig=build_signal({"close":prev["close"]},bar,vah,val)
+                        if sig is None or sig.pattern!="A": continue
+                        signals+=1; delta=oi[ts]["delta"]
+                        if variant=="FILTER_2_NO_STEPPED_DOWN_OR_OI_EXPANSION" and delta>0:
+                            continue
+                        result=bounded_exit(ts,sig.side,sig.entry_price,sig.stop_price,sig.target_price,flat,idx,split)
+                        if result is None: unresolved+=1
+                        else: trades.append({**result,"regime":regime,"sub_session":name,"oi_delta":delta})
+                        break
+            output[variant][requested_split]={"metrics":summarize(trades),"signals_considered":signals,
+                "unresolved_or_censored":unresolved,
+                "oi_expansion_entries":sum(x["oi_delta"]>0 for x in trades),
+                "oi_flat_or_contraction_entries":sum(x["oi_delta"]<=0 for x in trades)}
     return output
 
 def build_test_b_candidates(blocks,eligible,flat,idx):
