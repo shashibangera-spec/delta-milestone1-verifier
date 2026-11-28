@@ -396,23 +396,35 @@ def _build_value_ladder_model(market, cmp, prior, developing, completed_candles,
         high += padding
     else:
         low, high = 0.0, 1.0
+    # Reserve enough vertical room for the full label stack before mapping prices.
+    # The desktop requirement is the larger gap, so one SVG height works at both widths.
     height = max(float(plot_height), 120.0)
-    top, bottom = 34.0, height - 24.0
+    top, bottom_padding = 34.0, 24.0
+    desktop_gap = max(float(min_label_gap), 38.0)
+    mobile_gap = 32.0
+    max_lane_labels = max(
+        (sum(1 for item in levels if item["lane"] == lane) for lane in ("prior", "developing")),
+        default=0,
+    )
+    required_label_span = max(0, max_lane_labels - 1) * desktop_gap
+    available_label_span = max(0.0, height - top - bottom_padding)
+    if required_label_span > available_label_span:
+        height += required_label_span - available_label_span
+    bottom = height - bottom_padding
+
     def y_for(value):
         return bottom - ((value - low) / (high - low)) * (bottom - top)
 
     for item in levels:
         item["y"] = y_for(item["value"]) if item["value"] is not None else None
         item["label_y"] = item["y"]
-    # Stagger labels independently within each lane while preserving true y.
-    for lane in ("prior", "developing"):
-        lane_items = sorted(
-            [item for item in levels if item["lane"] == lane and item["y"] is not None],
-            key=lambda item: item["y"],
-        )
+        item["label_y_mobile"] = item["y"]
+
+    def stagger_lane(lane_items, gap):
+        lane_items.sort(key=lambda item: item["y"])
         for index in range(1, len(lane_items)):
-            if lane_items[index]["label_y"] - lane_items[index - 1]["label_y"] < min_label_gap:
-                lane_items[index]["label_y"] = lane_items[index - 1]["label_y"] + min_label_gap
+            if lane_items[index]["label_y"] - lane_items[index - 1]["label_y"] < gap:
+                lane_items[index]["label_y"] = lane_items[index - 1]["label_y"] + gap
         if lane_items and lane_items[-1]["label_y"] > bottom:
             shift = lane_items[-1]["label_y"] - bottom
             for item in lane_items:
@@ -421,6 +433,23 @@ def _build_value_ladder_model(market, cmp, prior, developing, completed_candles,
             shift = top - lane_items[0]["label_y"]
             for item in lane_items:
                 item["label_y"] += shift
+
+    # Keep actual price coordinates unchanged; only the label anchors are staggered.
+    for lane in ("prior", "developing"):
+        desktop_items = [
+            item for item in levels
+            if item["lane"] == lane and item["y"] is not None
+        ]
+        mobile_items = [
+            {**item, "label_y": item["y"]}
+            for item in levels
+            if item["lane"] == lane and item["y"] is not None
+        ]
+        stagger_lane(desktop_items, desktop_gap)
+        stagger_lane(mobile_items, mobile_gap)
+        mobile_positions = {item["key"]: item["label_y"] for item in mobile_items}
+        for item in desktop_items:
+            item["label_y_mobile"] = mobile_positions[item["key"]]
 
     above = min(
         (item["value"] for item in levels if item["value"] is not None and cmp_value is not None and item["value"] > cmp_value),
@@ -940,7 +969,7 @@ function renderValueLadder(prefix,model){
  const metric=(label,item,kind)=>'<div class="ladder-metric '+kind+'"><small>'+label+'</small><strong>'+ (item?ladderNumber(item.level):'N/A')+'</strong><div class="detail">'+(item?((item.points>0?'+':'')+ladderNumber(item.points)+' pts · '+ladderNumber(item.percent)+'%'):'No level available')+'</div></div>';
  metrics.innerHTML='<div class="ladder-metric cmp"><small>LIVE CMP</small><strong>'+ladderNumber(model.cmp)+'</strong><div class="detail">Latest available source price</div></div>'+
   metric('Nearest Level Above',model.nearest_above,'above')+metric('Nearest Level Below',model.nearest_below,'below');
- const mobile=window.matchMedia('(max-width:767px)').matches,width=mobile?360:1000,height=320,leftX=mobile?8:24,rightX=mobile?352:976,axisX=mobile?180:500,dividerLeft=mobile?120:333,dividerRight=mobile?240:667,top=34,bottom=height-24;
+ const mobile=window.matchMedia('(max-width:767px)').matches,width=mobile?360:1000,height=Math.max(320,Number(model.plot_height)||320),leftX=mobile?8:24,rightX=mobile?352:976,axisX=mobile?180:500,dividerLeft=mobile?120:333,dividerRight=mobile?240:667,top=34,bottom=height-24;
  const values=model.levels.filter(x=>x.value!==null&&x.value!==undefined).map(x=>Number(x.value)).concat([Number(model.cmp)]);
  let lo=Math.min(...values),hi=Math.max(...values),span=hi-lo,pad=Math.max(span*.08,Math.abs(hi)*.0005,1e-6);lo-=pad;hi+=pad;
  const y=value=>bottom-((Number(value)-lo)/(hi-lo))*(bottom-top);
@@ -951,7 +980,7 @@ function renderValueLadder(prefix,model){
  const prior=model.levels.filter(x=>x.lane==='prior'&&x.value!==null).sort((a,b)=>a.y-b.y);
  const dev=model.levels.filter(x=>x.lane==='developing'&&x.value!==null).sort((a,b)=>a.y-b.y);
  for(const item of model.levels.filter(x=>x.value!==null)){
-  const yy=y(item.value),isPrior=item.lane==='prior',labelY=Number(item.label_y),lineClass=isPrior?'prior-line':'dev-line',x1=isPrior?dividerLeft:dividerRight,x2=isPrior?axisX-25:axisX+25;
+  const yy=y(item.value),isPrior=item.lane==='prior',labelY=Number(mobile?item.label_y_mobile:item.label_y),lineClass=isPrior?'prior-line':'dev-line',x1=isPrior?dividerLeft:dividerRight,x2=isPrior?axisX-25:axisX+25;
   svg+='<line class="'+lineClass+'" x1="'+x1+'" y1="'+yy+'" x2="'+x2+'" y2="'+yy+'"/>';
   if(Math.abs(labelY-yy)>1)svg+='<path class="leader" d="M '+x2+' '+yy+' L '+(isPrior?dividerLeft-10:dividerRight+10)+' '+labelY+'"/>';
   const tx=isPrior?leftX:rightX,anchor=isPrior?'start':'end',label=item.label+(model.playbook_boundaries&&(item.key==='prior_vah'||item.key==='prior_val')?' · V1.4':'');
