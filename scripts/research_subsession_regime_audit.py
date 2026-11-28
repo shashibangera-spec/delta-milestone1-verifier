@@ -66,10 +66,20 @@ def read_profiles(conn):
           WHERE method_version='AMT_ENGINE_V1.7' AND source=%s AND symbol=%s AND session_date BETWEEN %s AND %s ORDER BY session_date""",(SOURCE,SYMBOL,START,END))
         rows=q.fetchall()
     bydate={r["session_date"]:r for r in rows}
-    if len(bydate)!=EXPECTED_SESSIONS or sorted(bydate)!=session_dates(): raise AuditError(f"Expected 189 V1.7 profile dates, found {len(bydate)}")
-    for d,r in bydate.items():
-        if not r["is_complete"] or r["profile_status"]!="COMPLETE" or r["expected_bars"]!=48 or r["observed_bars"]!=48 or r["vah_upper"] is None or r["val_lower"] is None: raise AuditError(f"{d}: profile not COMPLETE 48/48 with VA levels")
-    return bydate
+    valid={}; skipped=[]
+    for d in session_dates():
+        r=bydate.get(d)
+        if (r is None or not r["is_complete"] or r["profile_status"]!="COMPLETE"
+            or r["expected_bars"]!=48 or r["observed_bars"]!=48
+            or r["vah_upper"] is None or r["poc_lower"] is None or r["poc_upper"] is None
+            or r["val_lower"] is None):
+            skipped.append(d)
+        else:
+            valid[d]=r
+    if not valid: raise AuditError("No COMPLETE V1.7 profiles remain in the requested date range")
+    print("SKIPPED INCOMPLETE V1.7 SESSIONS: "+(", ".join(map(str,skipped)) if skipped else "none"),flush=True)
+    print(f"ELIGIBLE V1.7 SESSIONS: {len(valid)} / {EXPECTED_SESSIONS}",flush=True)
+    return valid,skipped
 
 def validate_days(candles):
     profiles={}; daybars={}
@@ -166,7 +176,7 @@ def test_a(daybars,daily_profiles,blocks):
     groups={k:summarize([t for t in trades if t["regime"]==k]) for k in ("OVERLAPPING / INSIDE","VALUE STEPPED UP","VALUE STEPPED DOWN")}
     return {"signal_count":signal_count,"unresolved":unresolved,"trades":len(trades),"by_preceding_subsession_regime":groups,"trades_detail":trades}
 
-def test_b(daybars,blocks):
+def test_b(daybars,blocks,eligible_dates):
     flat=sorted((b for day in daybars.values() for b in day),key=lambda x:x["candle_time"]); idx={b["candle_time"]:i for i,b in enumerate(flat)}
     events=[]; controls=[]; unresolved=0
     for d in session_dates():
@@ -207,14 +217,14 @@ def run():
     target=os.environ.get("V17_TARGET_READONLY_DATABASE_URL"); source=os.environ.get("V17_SOURCE_READONLY_DATABASE_URL")
     if not target or not source: raise AuditError("Missing read-only Neon credentials")
     with connect_ro(target,TARGET_HOST,"V1.7 production profile branch") as tc, connect_ro(source,SOURCE_HOST,"Delta source candle branch") as sc:
-        dbprofiles=read_profiles(tc); candles=read_candles(sc)
+        dbprofiles,skipped_profiles=read_profiles(tc); candles=read_candles(sc)
     daily,daybars=validate_days(candles)
     for d,p in daily.items():
         dbp=dbprofiles[d]
         if Decimal(str(p.vah_upper))!=Decimal(str(dbp["vah_upper"])) or Decimal(str(p.val_lower))!=Decimal(str(dbp["val_lower"])):
             raise AuditError(f"{d}: canonical daily.py VAH/VAL does not match persisted V1.7 profile")
-    blocks=build_blocks(daybars); a=test_a(daybars,daily,blocks); b=test_b(daybars,blocks)
-    report={"audit":"BTC sub-session regime audit","sample":{"start":str(START),"end":str(END),"complete_sessions":EXPECTED_SESSIONS,"price_candles":EXPECTED_SESSIONS*48,"v17_profiles":len(dbprofiles),"daily_profile_vah_val_parity":"PASS (all 189 persisted V1.7 profiles)"},
+    eligible_daily={d:daily[d] for d in eligible_dates}\n    blocks=build_blocks(daybars); a=test_a(daybars,eligible_daily,blocks); b=test_b(daybars,blocks,eligible_dates)
+    report={"audit":"BTC sub-session regime audit","sample":{"start":str(START),"end":str(END),"price_sessions":EXPECTED_SESSIONS,"price_candles":EXPECTED_SESSIONS*48,"eligible_v17_profiles":len(dbprofiles),"skipped_incomplete_v17_dates":[str(d) for d in skipped_profiles],"daily_profile_vah_val_parity":f"PASS ({len(dbprofiles)} eligible persisted V1.7 profiles)"},
       "windows_utc_ist":{"prior_us_overnight":"20:00–00:00 UTC / 01:30–05:30 IST","asia":"00:00–08:00 UTC / 05:30–13:30 IST","europe":"08:00–13:30 UTC / 13:30–19:00 IST","us_cash":"13:30–00:00 UTC / 19:00–05:30 IST"},
       "method":{"profile":"Dashboard $50 TPO rows, 70% VA, lower POC tie, left-first expansion","test_a":"Exact amt_engine.playbook_v14 build_signal/classify_discovery/evaluate_exit; Pattern A only; Asia + Europe; max one per sub-session; prior completed UTC-session VAH/VAL; min $200 risk","test_b":"Sub-session low below prior completed sub-session VAL; final close reclaims inside prior VAL/VAH; OVERLAPPING / INSIDE value regime; final completed 30m close entry; stop below excursion low with at least $200 risk; long 2R; stop-first","fees":{"taker":TAKER,"maker":MAKER,"gst":GST,"effective_taker":TAKER*GST,"effective_maker":MAKER*GST},"control":"Same UTC date/sub-session final completed 30m close; unconditional long with fixed $200 risk and 2R target"},
       "test_a":{k:v for k,v in a.items() if k!="trades_detail"},"test_b":b}
