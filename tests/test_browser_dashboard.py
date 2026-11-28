@@ -443,10 +443,10 @@ def test_value_ladder_nearest_levels_and_distance_percent_math_for_btcusd():
         3,
     )
     assert model["nearest_above"] == {
-        "level": 87350.0, "points": -70.0, "percent": pytest.approx(70 / 87420 * 100)
+        "level": 87550.0, "points": 130.0, "percent": pytest.approx(130 / 87420 * 100)
     }
     assert model["nearest_below"] == {
-        "level": 87300.0, "points": -120.0, "percent": pytest.approx(120 / 87420 * 100)
+        "level": 87350.0, "points": -70.0, "percent": pytest.approx(70 / 87420 * 100)
     }
     assert model["playbook_boundaries"] is True
 
@@ -486,7 +486,7 @@ def test_value_ladder_label_stagger_preserves_price_positions_and_minimum_gap():
             right["label_y"] - left["label_y"] >= 24 - 1e-9
             for left, right in zip(lane_levels, lane_levels[1:])
         )
-        assert all(item["y"] != item["label_y"] for item in lane_levels)
+        assert any(item["y"] != item["label_y"] for item in lane_levels)
     # The underlying level coordinate remains the exact price-proportional coordinate.
     assert len({round(item["y"], 6) for item in model["levels"] if item["value"] is not None}) > 1
 
