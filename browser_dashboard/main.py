@@ -357,7 +357,7 @@ def _calculate_subsession_value_progression(rows, session_date, now):
 
 
 def _build_value_ladder_model(market, cmp, prior, developing, completed_candles,
-                              plot_height=260, min_label_gap=24):
+                              plot_height=320, min_label_gap=24):
     """Build display-only, price-proportional ladder coordinates and distance labels.
 
     This helper consumes values already loaded by the dashboard. It performs no
@@ -397,7 +397,7 @@ def _build_value_ladder_model(market, cmp, prior, developing, completed_candles,
     else:
         low, high = 0.0, 1.0
     height = max(float(plot_height), 120.0)
-    top, bottom = 18.0, height - 18.0
+    top, bottom = 34.0, height - 24.0
     def y_for(value):
         return bottom - ((value - low) / (high - low)) * (bottom - top)
 
