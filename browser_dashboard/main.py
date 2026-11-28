@@ -848,7 +848,7 @@ function startRefreshTimer(){
  if(document.hidden)return;
  refreshTimer=setInterval(refreshActiveMarket,REFRESH_INTERVAL_MS);
 }
-refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});
+if(!document.hidden)refresh().catch(e=>{document.getElementById('asof').textContent='Data unavailable: '+e.message});
 startRefreshTimer();
 document.addEventListener('visibilitychange',()=>{
  if(document.hidden){stopRefreshTimer();return;}
