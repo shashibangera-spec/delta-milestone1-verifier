@@ -25,3 +25,9 @@ Expose the service on its Railway-generated domain after the migration is applie
 - Cumulative Playbook v1.3 realized R, active position count, and recent shadow trades.
 
 Developing levels are explicitly labelled as persisted V1.7 snapshots; they are not silently recomputed with a different TPO implementation. Live price and Discovery use the latest available completed source candles.
+
+
+## Delta BTC options OI context (collector branch)
+The BTCUSD tab includes an optional, read-only options OI context card. The collector stores Delta India ticker snapshots in the isolated `options_oi.btc_chain_snapshots` schema on collector branch `br-lingering-grass-ao07mgrx`. Apply `migrations/20261129_delta_btc_options_oi.sql` to that branch before enabling the feature. The migration grants SELECT to the existing `amt_dashboard_ro` role; the dashboard reads through its existing read-only `SOURCE_DATABASE_URL` connection. Do not use the production AMT branch or any writer credential for dashboard reads.
+
+The collector samples the nearest two upcoming expiries and ATM +/- six listed strikes (up to 52 rows). Option rows are retained until 24 hours after the 12:00 UTC settlement timestamp. The BTCUSD card shows descriptive PCR and OI walls plus strike changes versus the nearest available ~30m snapshot. It does not infer buyer/seller intent, participant identity, or market direction.
