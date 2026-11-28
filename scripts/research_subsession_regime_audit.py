@@ -60,11 +60,7 @@ def read_candles(conn):
         if any(t not in out for t in expected): raise AuditError(f"{d}: missing 30m slot")
     return out
 
-def read_profiles(conn):
-    with conn.cursor() as q:
-        q.execute("""SELECT session_date,profile_status,is_complete,expected_bars,observed_bars,vah_upper,poc_lower,poc_upper,val_lower FROM amt_engine_v17.session_profiles
-          WHERE method_version='AMT_ENGINE_V1.7' AND source=%s AND symbol=%s AND session_date BETWEEN %s AND %s ORDER BY session_date""",(SOURCE,SYMBOL,START,END))
-        rows=q.fetchall()
+def filter_profiles(rows):
     bydate={r["session_date"]:r for r in rows}
     valid={}; skipped=[]
     for d in session_dates():
@@ -77,6 +73,14 @@ def read_profiles(conn):
         else:
             valid[d]=r
     if not valid: raise AuditError("No COMPLETE V1.7 profiles remain in the requested date range")
+    return valid,skipped
+
+def read_profiles(conn):
+    with conn.cursor() as q:
+        q.execute("""SELECT session_date,profile_status,is_complete,expected_bars,observed_bars,vah_upper,poc_lower,poc_upper,val_lower FROM amt_engine_v17.session_profiles
+          WHERE method_version='AMT_ENGINE_V1.7' AND source=%s AND symbol=%s AND session_date BETWEEN %s AND %s ORDER BY session_date""",(SOURCE,SYMBOL,START,END))
+        rows=q.fetchall()
+    valid,skipped=filter_profiles(rows)
     print("SKIPPED INCOMPLETE V1.7 SESSIONS: "+(", ".join(map(str,skipped)) if skipped else "none"),flush=True)
     print(f"ELIGIBLE V1.7 SESSIONS: {len(valid)} / {EXPECTED_SESSIONS}",flush=True)
     return valid,skipped
@@ -200,6 +204,11 @@ def test_b(daybars,blocks,eligible_dates):
     return {"events":summarize(events),"matched_unconditional_final_bar_controls":summarize(controls),"event_count":len(events),"control_count":len(controls),"unresolved_or_censored":unresolved}
 
 def self_test():
+    good={"session_date":START,"is_complete":True,"profile_status":"COMPLETE","expected_bars":48,"observed_bars":48,"vah_upper":200,"poc_lower":150,"poc_upper":200,"val_lower":100}
+    partial={**good,"session_date":START+timedelta(days=1),"is_complete":False,"profile_status":"INCOMPLETE","observed_bars":47}
+    missing_poc={**good,"session_date":START+timedelta(days=2),"poc_lower":None}
+    eligible,skipped=filter_profiles([good,partial,missing_poc])
+    assert list(eligible)==[START] and skipped==[START+timedelta(days=1),START+timedelta(days=2)]
     assert [(a,b,n) for _,a,b,n in WINDOWS]==[(-4,0,8),(0,8,16),(8,13.5,11),(13.5,24,21)]
     p=subprofile([{"low":100,"high":199},{"low":100,"high":199},{"low":150,"high":249},{"low":150,"high":249}])
     assert p=={"val":Decimal("100"),"poc":Decimal("175"),"vah":Decimal("200")}
