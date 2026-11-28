@@ -513,7 +513,10 @@ def test_value_ladder_rendering_is_wired_for_btcusd_and_nifty_responsive_layout(
     assert "renderValueLadder('nifty',d.value_ladder)" in HTML
     assert "@media(max-width:767px)" in HTML
     assert "LIVE CMP" in HTML
-    assert "SHARED PRICE AXIS" in HTML
+    assert "PRICE AXIS" in HTML
+    assert 'class="leader"' in HTML
+    assert "window.matchMedia" in HTML
+    assert "width=mobile?360:1000" in HTML
     assert "Nearest Level Above" in HTML
     assert "Nearest Level Below" in HTML
     assert "No NIFTY Playbook trigger" in HTML
