@@ -4,6 +4,7 @@ WORKDIR /app
 COPY browser_dashboard/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY browser_dashboard/main.py ./main.py
+COPY options_oi_tracker.py ./options_oi_tracker.py
 COPY browser_dashboard/__init__.py ./browser_dashboard/__init__.py
 COPY browser_dashboard/auction_context.py ./browser_dashboard/auction_context.py
 COPY amt_engine/__init__.py ./amt_engine/__init__.py
