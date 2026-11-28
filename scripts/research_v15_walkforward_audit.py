@@ -25,6 +25,9 @@ def split_end_exclusive(split):
     end=IS_END if split=="IN_SAMPLE" else OOS_END
     return datetime.combine(end+timedelta(days=1),time.min,UTC)
 
+def classify_oi_delta(delta):
+    return "EXPANSION" if delta>0 else "FLAT_OR_CONTRACTION"
+
 def fee_r(entry,exitp,risk,entry_rate):
     if risk<=0: raise AuditError("Non-positive risk")
     return ((entry*entry_rate+exitp*TAKER)*GST)/risk
@@ -106,7 +109,7 @@ def test_a_replay(daily,blocks,oi,flat):
     return output
 
 def build_test_b_candidates(blocks,eligible,flat,idx):
-    events=[]; controls=[]; unresolved=0
+    events=[]; controls=[]; unresolved={"IN_SAMPLE":0,"BLIND_OUT_OF_SAMPLE":0}
     for d in base.evaluation_dates():
         split=split_for_day(d)
         if not split or d not in eligible: continue
@@ -123,7 +126,7 @@ def build_test_b_candidates(blocks,eligible,flat,idx):
                 row={"entry_time":ts+BAR,"day":d,"split":split,"sub_session":name,
                      "risk_points":risk,"is_event":event}
                 if event:
-                    if outcome is None: unresolved+=1
+                    if outcome is None: unresolved[split]+=1
                     else: events.append({**row,**outcome})
                 elif outcome is not None: controls.append({**row,**outcome})
             prior_name=name
@@ -150,7 +153,7 @@ def test_b_replay(blocks,eligible,flat):
         erows=[p["event"] for p in matched]; crows=[p["control"] for p in matched]
         result[split]={"reclaim_events":summarize(erows),"one_to_one_matched_controls":summarize(crows),
             "matched_pairs":len(matched),"unmatched_reclaim_events":sum(x["split"]==split for x in unmatched),
-            "unresolved_or_censored_reclaim_events":sum(x["split"]==split for x in events if x not in erows),
+            "unresolved_or_censored_reclaim_events":unresolved[split],
             "mean_absolute_stop_width_difference":sum(p["absolute_stop_width_difference"] for p in matched)/len(matched) if matched else None}
     return result
 
@@ -163,6 +166,7 @@ def self_test():
     assert split_for_day(date(2026,11,27)) is None
     assert split_end_exclusive("IN_SAMPLE")==datetime(2026,9,1,tzinfo=UTC)
     assert fee_r(10000,10200,200,TAKER)>fee_r(10000,10200,200,MAKER)
+    assert classify_oi_delta(0.01)=="EXPANSION" and classify_oi_delta(0.0)=="FLAT_OR_CONTRACTION"
     ev=[{"entry_time":datetime(2026,6,1,tzinfo=UTC),"split":"IN_SAMPLE","sub_session":"Asia","risk_points":250.},
         {"entry_time":datetime(2026,6,2,tzinfo=UTC),"split":"IN_SAMPLE","sub_session":"Asia","risk_points":300.}]
     co=[{"entry_time":datetime(2026,6,3,tzinfo=UTC),"split":"IN_SAMPLE","sub_session":"Asia","risk_points":251.},
