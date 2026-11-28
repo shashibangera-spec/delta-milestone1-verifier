@@ -336,11 +336,11 @@ def process_cycle(conn,baseline,first_write_verified):
     if not first_write_verified:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT COUNT(*) FROM research.delta_candles
+                SELECT COUNT(*) AS new_confirmed_count FROM research.delta_candles
                 WHERE source='delta_india' AND resolution='30m' AND candle_time > %s
                   AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
             """,(baseline["baseline_max"],))
-            any_new_confirmed = cur.fetchone()[0] > 0
+            any_new_confirmed = cur.fetchone()["new_confirmed_count"] > 0
         if any_new_confirmed:
             result=verify_baseline_unchanged(conn,baseline)
             log("post_first_write_verification",**result)
