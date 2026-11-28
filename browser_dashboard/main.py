@@ -803,7 +803,9 @@ def load_options_oi_context():
                     UNION ALL SELECT '1h', (SELECT max(snapshot_ts) FROM options_oi.btc_chain_snapshots, latest
                                             WHERE snapshot_ts <= latest.ts - interval '1 hour')
                     UNION ALL SELECT 'session_open', (SELECT min(snapshot_ts) FROM options_oi.btc_chain_snapshots, latest
-                        WHERE snapshot_ts >= date_trunc('day', latest.ts) AND snapshot_ts <= latest.ts)
+                        WHERE snapshot_ts >= date_trunc('day', latest.ts)
+                          AND snapshot_ts < date_trunc('day', latest.ts) + interval '30 minutes'
+                          AND snapshot_ts <= latest.ts)
                 )
                 SELECT a.label, a.ts AS anchor_ts, s.snapshot_ts, s.product_id, s.symbol,
                        s.expiry_date, s.expiry_ts, s.contract_type, s.strike_price,
