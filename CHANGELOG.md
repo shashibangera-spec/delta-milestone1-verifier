@@ -59,3 +59,11 @@
 - Strengthen the offline writer transaction fake so rollback removes the profile insert, all TPO inserts, and the in-transaction SUCCEEDED audit update before the separate FAILED audit update is recorded.
 - Add the writer test file to pull-request workflow path filters so changes to daily writer behavior cannot bypass the offline test workflow.
 - No runtime calculation, methodology, database, schema, collector, dashboard, Pine, or production changes.
+
+
+## Delta BTC options OI observation context
+- Add isolated Delta India options ticker snapshots on the collector branch, storing a dynamic ATM +/- six strike window for the nearest two upcoming expiries (up to 52 rows per cycle).
+- Preserve UTC expiry settlement at 12:00 and retain rows until 24 hours after settlement; add a standalone, review-only Neon migration in the `options_oi` schema.
+- Piggyback the existing :02/:32 UTC collector cycle using a separate connection and transaction; options failures are logged without affecting PRICE/OI candle collection.
+- Add a read-only BTCUSD dashboard card with current/next expiry PCR, highest OI call/put strikes and descriptive unwind/rebuild comparisons against the ~30m snapshot. Missing baselines remain unavailable.
+- Add offline parsing, selection, settlement-purge, PCR/wall, event-threshold and fail-safe isolation tests. No migration is applied automatically.

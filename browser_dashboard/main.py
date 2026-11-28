@@ -788,6 +788,59 @@ def nifty_overview(_username: str = Depends(require_dashboard_auth)):
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Nifty data unavailable: {type(exc).__name__}") from exc
 
+def load_options_oi_context():
+    """Read options snapshots from the collector branch using its read-only identity."""
+    from options_oi_tracker import build_options_context
+
+    with _connect("SOURCE_DATABASE_URL", EXPECTED_SOURCE_HOST) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH latest AS (SELECT max(snapshot_ts) AS ts FROM options_oi.btc_chain_snapshots),
+                anchors AS (
+                    SELECT 'current'::text AS label, ts FROM latest
+                    UNION ALL SELECT '30m', (SELECT max(snapshot_ts) FROM options_oi.btc_chain_snapshots, latest
+                                              WHERE snapshot_ts <= latest.ts - interval '30 minutes')
+                    UNION ALL SELECT '1h', (SELECT max(snapshot_ts) FROM options_oi.btc_chain_snapshots, latest
+                                            WHERE snapshot_ts <= latest.ts - interval '1 hour')
+                    UNION ALL SELECT 'session_open', (SELECT min(snapshot_ts) FROM options_oi.btc_chain_snapshots, latest
+                        WHERE snapshot_ts >= date_trunc('day', latest.ts) AND snapshot_ts <= latest.ts)
+                )
+                SELECT a.label, a.ts AS anchor_ts, s.snapshot_ts, s.product_id, s.symbol,
+                       s.expiry_date, s.expiry_ts, s.contract_type, s.strike_price,
+                       s.oi_btc, s.oi_usd, s.mark_iv, s.delta, s.gamma, s.volume_btc, s.spot_price
+                FROM anchors a LEFT JOIN options_oi.btc_chain_snapshots s ON s.snapshot_ts=a.ts
+                WHERE a.ts IS NOT NULL
+                ORDER BY a.label, s.expiry_ts, s.strike_price
+            """)
+            fetched = cur.fetchall()
+    grouped = {"current": [], "30m": [], "1h": [], "session_open": []}
+    timestamps = {}
+    for row in fetched:
+        label = row["label"]
+        if row["snapshot_ts"] is not None:
+            grouped[label].append(dict(row))
+            timestamps[label] = row["snapshot_ts"]
+    current = grouped["current"]
+    if not current:
+        return {"status": "UNAVAILABLE", "reason": "No options snapshots available",
+                "expiries": [], "events": [], "snapshot_times": timestamps}
+    model = build_options_context(current, {k: grouped[k] for k in ("30m", "1h", "session_open")})
+    return _json({"status": "READY", **model, "snapshot_times": timestamps,
+                  "spot_price": current[0]["spot_price"]})
+
+
+@app.get("/api/options-oi")
+def options_oi_overview(_username: str = Depends(require_dashboard_auth)):
+    try:
+        return _cached_json("options_oi", load_options_oi_context)
+    except Exception as exc:
+        # A missing migration or inaccessible source branch is shown as unavailable;
+        # it must not interfere with the existing BTC overview endpoint.
+        return JSONResponse({"status": "UNAVAILABLE",
+                             "reason": f"Options OI unavailable: {type(exc).__name__}",
+                             "expiries": [], "events": [], "snapshot_times": {}})
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(_username: str = Depends(require_dashboard_auth)):
     return HTML
@@ -876,6 +929,17 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
  <div class="ladder-heading"><div><h2>VALUE LADDER · PRIOR VS LIVE DEVELOPING</h2><div class="sub">BTCUSD · Prior VAH/VAL are Playbook v1.4 boundary references only</div></div><span class="pill">READ-ONLY</span></div>
  <div class="ladder-metrics" id="btc-ladder-metrics"></div><div class="ladder-plot" id="btc-ladder-plot" aria-live="polite"></div>
  <div class="sub ladder-note">Prior VAH / VAL are frozen Playbook v1.4 boundary references, not automatic entry signals. Developing values use completed current-session candles only.</div>
+</section>
+<section class="panel section" id="options-oi-card">
+ <div class="ladder-heading"><div><h2>OPTIONS OI · EXPIRY & STRIKE CONTEXT</h2>
+ <div class="sub">Delta India live chain snapshots · descriptive OI context only; not directional or execution signals</div></div><span class="pill">READ-ONLY</span></div>
+ <div class="sub" id="options-oi-status">Loading options chain snapshot…</div>
+ <div class="scroll"><table><thead><tr><th>Expiry</th><th>Call OI (BTC)</th><th>Put OI (BTC)</th><th>Put / Call</th><th>Largest Call OI</th><th>Largest Put OI</th></tr></thead>
+ <tbody id="options-oi-expiries"><tr><td colspan="6">Awaiting options snapshots…</td></tr></tbody></table></div>
+ <h3>STRIKE OI CHANGES VS ~30M BASELINE</h3>
+ <div class="scroll"><table><thead><tr><th>Baseline</th><th>Contract</th><th>Strike</th><th>Observation</th><th>Δ OI (BTC)</th><th>Δ OI (%)</th></tr></thead>
+ <tbody id="options-oi-events"><tr><td colspan="6">Awaiting comparable snapshots…</td></tr></tbody></table></div>
+ <div class="sub">PCR = put OI / call OI in the selected ATM ±6 strike window. Walls are highest observed OI in that same window. Missing comparison snapshots are not inferred.</div>
 </section>
 <section class="grid">
  <div class="panel"><h2>Latest BTC price</h2><div class="metric" id="price">—</div><div class="sub" id="price-time">—</div></div>
@@ -1000,9 +1064,38 @@ function renderValueLadder(prefix,model){
 window.addEventListener('resize',()=>{for(const [key,model] of Object.entries(ladderModels))renderValueLadder(key,model)});
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
 const cls=v=>String(v||'').includes('ABOVE')||v==='EXPANSION'?'green':String(v||'').includes('BELOW')||v==='CONTRACTION_OR_FLAT'?'red':'amber';
+async function refreshOptionsOi(){
+ const status=document.getElementById('options-oi-status');
+ try{
+  const response=await fetch('/api/options-oi',{cache:'no-store'});
+  const data=await response.json();
+  if(data.status!=='READY'){
+   status.textContent=data.reason||'Options OI unavailable; no snapshots available.';
+   document.getElementById('options-oi-expiries').innerHTML='<tr><td colspan="6">Unavailable</td></tr>';
+   document.getElementById('options-oi-events').innerHTML='<tr><td colspan="5">No comparable snapshot data</td></tr>';
+   return;
+  }
+  const times=data.snapshot_times||{};
+  status.textContent='Latest snapshot '+(times.current?new Date(times.current).toISOString().replace('T',' ').slice(0,19)+' UTC':'unavailable')+
+   ' · ~30m '+(times['30m']?'available':'unavailable')+' · ~1h '+(times['1h']?'available':'unavailable')+
+   ' · Session Open '+(times.session_open?'available':'unavailable')+' · Spot '+fmt(data.spot_price);
+  const pcr=v=>v===null||v===undefined?'—':Number(v).toFixed(3);
+  const oi=v=>v===null||v===undefined?'—':fmt(v);
+  document.getElementById('options-oi-expiries').innerHTML=(data.expiries||[]).map(e=>{
+   const c=e.top_call_walls&&e.top_call_walls[0],p=e.top_put_walls&&e.top_put_walls[0];
+   return '<tr><td>'+e.expiry_date+'</td><td>'+oi(e.pcr.call_oi_btc)+'</td><td>'+oi(e.pcr.put_oi_btc)+'</td><td>'+pcr(e.pcr.put_call_ratio)+'</td>'+
+    '<td>'+(c?fmt(c.strike_price)+' · '+oi(c.oi_btc):'—')+'</td><td>'+(p?fmt(p.strike_price)+' · '+oi(p.oi_btc):'—')+'</td></tr>';
+  }).join('')||'<tr><td colspan="6">No current expiry rows</td></tr>';
+  document.getElementById('options-oi-events').innerHTML=(data.events||[]).map(e=>
+   '<tr><td>'+e.contract_type.replace('_options','').toUpperCase()+'</td><td>'+fmt(e.strike_price)+'</td><td>'+e.kind+'</td><td>'+fmt(e.change_btc)+'</td><td>'+(e.change_pct===null?'—':fmt(e.change_pct)+'%')+'</td></tr>'
+  ).join('')||'<tr><td colspan="6">No strike crossed the descriptive unwind/rebuild thresholds, or comparison snapshots are unavailable.</td></tr>';
+ }catch(e){
+  status.textContent='Options OI unavailable: '+e.message;
+ }
+}
 async function refresh(){
  const r=await fetch('/api/overview',{cache:'no-store'});if(!r.ok)throw new Error('API '+r.status);
- const d=await r.json();const p=d.profile||{},v=d.developing||{},l=d.live||{},sh=d.shadow||{};
+ const d=await r.json();refreshOptionsOi();const p=d.profile||{},v=d.developing||{},l=d.live||{},sh=d.shadow||{};
  renderValueLadder('btc',d.value_ladder);
  document.getElementById('asof').textContent='UTC '+new Date(d.as_of_utc).toISOString().replace('T',' ').slice(0,19);
  const px=l.price||{};document.getElementById('price').textContent=fmt(px.close_value);

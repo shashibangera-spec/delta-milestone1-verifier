@@ -5,6 +5,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY oi_metrics.py .
 COPY milestone1_delta_verify.py .
 COPY continuous_collector.py .
+COPY options_oi_tracker.py .
 COPY tests ./tests
 RUN python -m unittest tests/test_continuous_collector.py
 ENV PYTHONUNBUFFERED=1

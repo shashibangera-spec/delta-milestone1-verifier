@@ -8,6 +8,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+from options_oi_tracker import collect_options_snapshot
+
 import psycopg
 from psycopg.rows import dict_row
 
@@ -345,6 +347,18 @@ def process_cycle(conn,baseline,first_write_verified):
             first_write_verified=True
     return first_write_verified
 
+def collect_options_safely(database_url, collector=None):
+    """Isolate the options API/DB path from the core PRICE/OI collector cycle."""
+    try:
+        run = collector or collect_options_snapshot
+        result = run(database_url)
+        log("options_oi_snapshot_saved", **result)
+        return True
+    except Exception as exc:
+        log("options_oi_collection_error", error=str(exc)[:1000])
+        return False
+
+
 def next_scheduled_wake(now):
     """Return the next strictly-future UTC :02 or :32 half-hour wake."""
     now = now.astimezone(timezone.utc)
@@ -447,6 +461,9 @@ def main():
                         expected_candle_open_utc=datetime.fromtimestamp(
                             expected_slot, timezone.utc
                         ).isoformat())
+                    # Options uses a separate connection and transaction. Any API,
+                    # parsing, permission, or insert failure is logged and isolated.
+                    collect_options_safely(DATABASE_URL)
                     break
                 log("scheduled_candle_pair_not_ready", attempt=attempt,
                     expected_candle_open_utc=datetime.fromtimestamp(
