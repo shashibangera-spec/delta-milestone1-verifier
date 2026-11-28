@@ -1,0 +1,77 @@
+name: BTC V1.5 Walk-Forward and OI Research Audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/research-v15-walkforward.yml'
+      - 'scripts/research_v15_walkforward_audit.py'
+      - 'tests/test_research_v15_walkforward_audit.py'
+      - 'scripts/research_subsession_regime_audit.py'
+      - 'amt_engine/daily.py'
+      - 'amt_engine/playbook_v14.py'
+      - 'requirements.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/research-v15-walkforward.yml'
+      - 'scripts/research_v15_walkforward_audit.py'
+      - 'tests/test_research_v15_walkforward_audit.py'
+      - 'scripts/research_subsession_regime_audit.py'
+      - 'amt_engine/daily.py'
+      - 'amt_engine/playbook_v14.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+env:
+  PYTHONPATH: .
+concurrency:
+  group: research-v15-walkforward-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  offline-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requirements
+        run: python -m pip install -r requirements.txt
+      - name: Compile research modules
+        run: python -m compileall -q amt_engine/daily.py amt_engine/playbook_v14.py scripts/research_subsession_regime_audit.py scripts/research_v15_walkforward_audit.py tests/test_research_v15_walkforward_audit.py
+      - name: Run offline-only tests (no database access)
+        run: |
+          python scripts/research_v15_walkforward_audit.py --self-test
+          python -m unittest tests.test_research_v15_walkforward_audit
+
+  research:
+    if: github.event_name == 'workflow_dispatch'
+    needs: offline-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requirements
+        run: python -m pip install -r requirements.txt
+      - name: Validate read-only Neon credentials
+        shell: bash
+        env:
+          V17_TARGET_READONLY_DATABASE_URL: \${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: \${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$V17_TARGET_READONLY_DATABASE_URL" || { echo 'Missing target read-only Neon credential'; exit 1; }
+          test -n "$V17_SOURCE_READONLY_DATABASE_URL" || { echo 'Missing source read-only Neon credential'; exit 1; }
+      - name: Run read-only V1.5 walk-forward and OI audit
+        env:
+          V17_TARGET_READONLY_DATABASE_URL: \${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: \${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+        run: python scripts/research_v15_walkforward_audit.py
