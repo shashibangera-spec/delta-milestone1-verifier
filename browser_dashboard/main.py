@@ -932,33 +932,36 @@ async function refreshNifty(){
 
 
 function ladderNumber(v){return v===null||v===undefined||!Number.isFinite(Number(v))?'N/A':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});}
+const ladderModels={};
 function renderValueLadder(prefix,model){
+ ladderModels[prefix]=model;
  const metrics=document.getElementById(prefix+'-ladder-metrics'),plot=document.getElementById(prefix+'-ladder-plot');
  if(!model||model.cmp===null||model.cmp===undefined){metrics.innerHTML='<div class="ladder-metric cmp"><small>LIVE CMP</small><strong>N/A</strong></div><div class="ladder-metric"><small>Nearest Level Above</small><strong>N/A</strong></div><div class="ladder-metric"><small>Nearest Level Below</small><strong>N/A</strong></div>';plot.innerHTML='<div class="ladder-empty">Value ladder unavailable — source CMP is not available.</div>';return;}
  const metric=(label,item,kind)=>'<div class="ladder-metric '+kind+'"><small>'+label+'</small><strong>'+ (item?ladderNumber(item.level):'N/A')+'</strong><div class="detail">'+(item?((item.points>0?'+':'')+ladderNumber(item.points)+' pts · '+ladderNumber(item.percent)+'%'):'No level available')+'</div></div>';
  metrics.innerHTML='<div class="ladder-metric cmp"><small>LIVE CMP</small><strong>'+ladderNumber(model.cmp)+'</strong><div class="detail">Latest available source price</div></div>'+
   metric('Nearest Level Above',model.nearest_above,'above')+metric('Nearest Level Below',model.nearest_below,'below');
- const width=1000,height=320,leftX=24,rightX=976,axisX=500,top=34,bottom=height-24;
+ const mobile=window.matchMedia('(max-width:767px)').matches,width=mobile?360:1000,height=320,leftX=mobile?8:24,rightX=mobile?352:976,axisX=mobile?180:500,dividerLeft=mobile?120:333,dividerRight=mobile?240:667,top=34,bottom=height-24;
  const values=model.levels.filter(x=>x.value!==null&&x.value!==undefined).map(x=>Number(x.value)).concat([Number(model.cmp)]);
  let lo=Math.min(...values),hi=Math.max(...values),span=hi-lo,pad=Math.max(span*.08,Math.abs(hi)*.0005,1e-6);lo-=pad;hi+=pad;
  const y=value=>bottom-((Number(value)-lo)/(hi-lo))*(bottom-top);
  const laneTitles='<text class="lane-title" x="24" y="20">PRIOR VALUE'+(model.playbook_boundaries?' · V1.4 BOUNDARIES':'')+'</text><text class="lane-title" x="500" y="20" text-anchor="middle">SHARED PRICE AXIS</text><text class="lane-title" x="976" y="20" text-anchor="end">LIVE DEVELOPING VALUE</text>';
  let svg='<svg class="ladder-svg" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+model.market+' price-proportional prior and developing value ladder">';
- svg+=laneTitles+'<line x1="333" y1="28" x2="333" y2="'+(height-10)+'" stroke="#243247"/><line x1="667" y1="28" x2="667" y2="'+(height-10)+'" stroke="#243247"/><line class="axis" x1="'+axisX+'" y1="30" x2="'+axisX+'" y2="'+(height-12)+'"/>';
- for(let t=0;t<7;t++){let yy=top+(bottom-top)*t/6;svg+='<line class="axis-tick" x1="493" y1="'+yy+'" x2="507" y2="'+yy+'"/>';}
+ svg+=laneTitles+'<line x1="'+dividerLeft+'" y1="28" x2="'+dividerLeft+'" y2="'+(height-10)+'" stroke="#243247"/><line x1="'+dividerRight+'" y1="28" x2="'+dividerRight+'" y2="'+(height-10)+'" stroke="#243247"/><line class="axis" x1="'+axisX+'" y1="30" x2="'+axisX+'" y2="'+(height-12)+'"/>';
+ for(let t=0;t<7;t++){let yy=top+(bottom-top)*t/6;svg+='<line class="axis-tick" x1="'+(axisX-7)+'" y1="'+yy+'" x2="'+(axisX+7)+'" y2="'+yy+'"/>';}
  const prior=model.levels.filter(x=>x.lane==='prior'&&x.value!==null).sort((a,b)=>a.y-b.y);
  const dev=model.levels.filter(x=>x.lane==='developing'&&x.value!==null).sort((a,b)=>a.y-b.y);
  for(const item of model.levels.filter(x=>x.value!==null)){
-  const yy=y(item.value),isPrior=item.lane==='prior',labelY=Number(item.label_y),lineClass=isPrior?'prior-line':'dev-line',x1=isPrior?333:667,x2=isPrior?475:525;
+  const yy=y(item.value),isPrior=item.lane==='prior',labelY=Number(item.label_y),lineClass=isPrior?'prior-line':'dev-line',x1=isPrior?dividerLeft:dividerRight,x2=isPrior?axisX-25:axisX+25;
   svg+='<line class="'+lineClass+'" x1="'+x1+'" y1="'+yy+'" x2="'+x2+'" y2="'+yy+'"/>';
-  if(Math.abs(labelY-yy)>1)svg+='<path class="leader" d="M '+x2+' '+yy+' L '+(isPrior?310:690)+' '+labelY+'"/>';
-  const tx=isPrior?24:976,anchor=isPrior?'start':'end',label=item.label+(model.playbook_boundaries&&(item.key==='prior_vah'||item.key==='prior_val')?' · V1.4':'');
+  if(Math.abs(labelY-yy)>1)svg+='<path class="leader" d="M '+x2+' '+yy+' L '+(isPrior?dividerLeft-10:dividerRight+10)+' '+labelY+'"/>';
+  const tx=isPrior?leftX:rightX,anchor=isPrior?'start':'end',label=item.label+(model.playbook_boundaries&&(item.key==='prior_vah'||item.key==='prior_val')?' · V1.4':'');
   svg+='<text class="level-label" x="'+tx+'" y="'+(labelY-3)+'" text-anchor="'+anchor+'">'+label+'</text><text class="level-price" x="'+tx+'" y="'+(labelY+13)+'" text-anchor="'+anchor+'">'+ladderNumber(item.value)+'</text>';
  }
  const cmpY=y(model.cmp),cmpText='LIVE CMP — '+ladderNumber(model.cmp);
- svg+='<line class="cmp-line" x1="8" y1="'+cmpY+'" x2="992" y2="'+cmpY+'"/><rect class="cmp-label" x="397" y="'+(cmpY-13)+'" width="206" height="26" rx="8"/><text class="cmp-text" x="500" y="'+(cmpY+5)+'" text-anchor="middle">'+cmpText+'</text></svg>';
+ svg+='<line class="cmp-line" x1="4" y1="'+cmpY+'" x2="'+(width-4)+'" y2="'+cmpY+'"/><rect class="cmp-label" x="'+(axisX-82)+'" y="'+(cmpY-13)+'" width="164" height="26" rx="8"/><text class="cmp-text" x="'+axisX+'" y="'+(cmpY+5)+'" text-anchor="middle">'+cmpText+'</text></svg>';
  plot.innerHTML=svg;
 }
+window.addEventListener('resize',()=>{for(const [key,model] of Object.entries(ladderModels))renderValueLadder(key,model)});
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
 const cls=v=>String(v||'').includes('ABOVE')||v==='EXPANSION'?'green':String(v||'').includes('BELOW')||v==='CONTRACTION_OR_FLAT'?'red':'amber';
 async function refresh(){
