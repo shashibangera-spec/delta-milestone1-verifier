@@ -166,3 +166,48 @@ class CollectorSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class CollectorPairPersistenceTests(unittest.TestCase):
+    class FakeCursor:
+        def __init__(self, pair_count):
+            self.pair_count = pair_count
+            self.sql = None
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchone(self):
+            return (self.pair_count,)
+
+    class FakeConnection:
+        def __init__(self, pair_count):
+            self.fake_cursor = CollectorPairPersistenceTests.FakeCursor(pair_count)
+
+        def cursor(self):
+            return self.fake_cursor
+
+    def test_candle_pair_ready_requires_exact_price_and_oi_timestamp(self):
+        from continuous_collector import latest_pair_covers
+
+        expected = int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp())
+        conn = self.FakeConnection(2)
+        self.assertTrue(latest_pair_covers(conn, expected))
+        self.assertIn("COUNT(DISTINCT series_type)", conn.fake_cursor.sql)
+        self.assertEqual(conn.fake_cursor.params[0], datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc))
+
+    def test_candle_pair_not_ready_when_either_series_is_missing(self):
+        from continuous_collector import latest_pair_covers
+
+        expected = int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertFalse(latest_pair_covers(self.FakeConnection(1), expected))
+        self.assertFalse(latest_pair_covers(self.FakeConnection(0), expected))
