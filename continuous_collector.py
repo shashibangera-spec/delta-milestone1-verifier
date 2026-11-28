@@ -6,7 +6,9 @@ import signal
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone\n\nfrom options_oi_tracker import collect_options_snapshot
+from datetime import datetime, timedelta, timezone
+
+from options_oi_tracker import collect_options_snapshot
 
 import psycopg
 from psycopg.rows import dict_row
