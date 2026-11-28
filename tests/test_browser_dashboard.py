@@ -560,3 +560,10 @@ def test_value_ladder_renderer_explicitly_prints_missing_prior_and_developing_le
     assert "(mobile?'PRIOR':'PRIOR VALUE')" in HTML
     assert "(mobile?'PRICE AXIS':'SHARED PRICE AXIS')" in HTML
     assert "(mobile?'LIVE DEV':'LIVE DEVELOPING VALUE')" in HTML
+
+def test_options_session_open_anchor_is_limited_to_first_30m():
+    import inspect
+    from browser_dashboard import main
+
+    source = inspect.getsource(main.load_options_oi_context)
+    assert "date_trunc('day', latest.ts) + interval '30 minutes'" in source
