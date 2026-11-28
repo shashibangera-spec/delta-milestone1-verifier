@@ -520,3 +520,13 @@ def test_value_ladder_rendering_is_wired_for_btcusd_and_nifty_responsive_layout(
     assert "Nearest Level Above" in HTML
     assert "Nearest Level Below" in HTML
     assert "No NIFTY Playbook trigger" in HTML
+
+
+def test_value_ladder_renderer_explicitly_prints_missing_prior_and_developing_levels_as_na():
+    from browser_dashboard.main import HTML
+
+    assert "const missing=model.levels.filter" in HTML
+    assert "text-anchor=\"'+anchor+'\">N/A</text>" in HTML
+    assert "(mobile?'PRIOR':'PRIOR VALUE')" in HTML
+    assert "(mobile?'PRICE AXIS':'SHARED PRICE AXIS')" in HTML
+    assert "(mobile?'LIVE DEV':'LIVE DEVELOPING VALUE')" in HTML
