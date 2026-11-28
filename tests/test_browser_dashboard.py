@@ -431,3 +431,89 @@ def test_dashboard_refresh_pauses_when_hidden_and_resumes_immediately():
     assert "setInterval(refreshActiveMarket,REFRESH_INTERVAL_MS)" in HTML
     assert "},10000)" not in HTML
     assert "if(!document.hidden)refresh()" in HTML
+
+
+def test_value_ladder_nearest_levels_and_distance_percent_math_for_btcusd():
+    from browser_dashboard.main import _build_value_ladder_model
+
+    model = _build_value_ladder_model(
+        "BTCUSD", 87420,
+        {"vah": 87650, "poc": 87300, "val": 87100},
+        {"vah": 87550, "poc": 87350, "val": 87200},
+        3,
+    )
+    assert model["nearest_above"] == {
+        "level": 87350.0, "points": -70.0, "percent": pytest.approx(70 / 87420 * 100)
+    }
+    assert model["nearest_below"] == {
+        "level": 87300.0, "points": -120.0, "percent": pytest.approx(120 / 87420 * 100)
+    }
+    assert model["playbook_boundaries"] is True
+
+
+def test_value_ladder_nifty_is_descriptive_and_has_no_playbook_boundary():
+    from browser_dashboard.main import _build_value_ladder_model
+
+    model = _build_value_ladder_model(
+        "NIFTY 50 SPOT", 26180.5,
+        {"vah": 26250, "poc": 26150, "val": 26050},
+        {"vah": 26220, "poc": 26170, "val": 26100},
+        4,
+    )
+    assert model["nearest_above"]["level"] == 26220
+    assert model["nearest_above"]["points"] == 39.5
+    assert model["nearest_above"]["percent"] == pytest.approx(39.5 / 26180.5 * 100)
+    assert model["nearest_below"]["level"] == 26170
+    assert model["nearest_below"]["points"] == -10.5
+    assert model["playbook_boundaries"] is False
+
+
+def test_value_ladder_label_stagger_preserves_price_positions_and_minimum_gap():
+    from browser_dashboard.main import _build_value_ladder_model
+
+    model = _build_value_ladder_model(
+        "BTCUSD", 100,
+        {"vah": 100.01, "poc": 100.02, "val": 99.99},
+        {"vah": 100.015, "poc": 100.025, "val": 99.985},
+        2, plot_height=260, min_label_gap=24,
+    )
+    for lane in ("prior", "developing"):
+        lane_levels = sorted(
+            [item for item in model["levels"] if item["lane"] == lane and item["y"] is not None],
+            key=lambda item: item["label_y"],
+        )
+        assert all(
+            right["label_y"] - left["label_y"] >= 24 - 1e-9
+            for left, right in zip(lane_levels, lane_levels[1:])
+        )
+        assert all(item["y"] != item["label_y"] for item in lane_levels)
+    # The underlying level coordinate remains the exact price-proportional coordinate.
+    assert len({round(item["y"], 6) for item in model["levels"] if item["value"] is not None}) > 1
+
+
+def test_value_ladder_zero_completed_candles_returns_na_for_all_developing_levels():
+    from browser_dashboard.main import _build_value_ladder_model
+
+    model = _build_value_ladder_model(
+        "NIFTY 50 SPOT", 25000,
+        {"vah": 25100, "poc": 25000, "val": 24900},
+        {"vah": 25120, "poc": 25020, "val": 24920},
+        0,
+    )
+    assert model["candle_count"] == 0
+    assert [item["value"] for item in model["levels"] if item["lane"] == "developing"] == [None, None, None]
+
+
+def test_value_ladder_rendering_is_wired_for_btcusd_and_nifty_responsive_layout():
+    from browser_dashboard.main import HTML
+
+    assert 'id="btc-value-ladder-card"' in HTML
+    assert 'id="nifty-value-ladder-card"' in HTML
+    assert "renderValueLadder('btc',d.value_ladder)" in HTML
+    assert "renderValueLadder('nifty',d.value_ladder)" in HTML
+    assert "@media(max-width:767px)" in HTML
+    assert "LIVE CMP" in HTML
+    assert "SHARED PRICE AXIS" in HTML
+    assert "Nearest Level Above" in HTML
+    assert "Nearest Level Below" in HTML
+    assert "No NIFTY Playbook trigger" in HTML
