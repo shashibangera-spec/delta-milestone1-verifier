@@ -51,7 +51,10 @@ def read_candles(conn):
         o,h,l,c=map(float,vals)
         if h<max(o,c,l) or l>min(o,c,h): raise AuditError(f"Invalid OHLC at {ts}")
         out[ts]={"candle_time":ts,"open":o,"high":h,"low":l,"close":c}
-    in_scope=sum(1 for ts in out if START <= ts.date() <= END)\n    if in_scope!=EXPECTED_SESSIONS*48: raise AuditError(f"Expected {EXPECTED_SESSIONS*48} in-scope candles, found {in_scope}")\n    warmup=session_start(START)-timedelta(hours=4)\n    if any(warmup+BAR*i not in out for i in range(8)): raise AuditError("Missing prior US overnight warm-up candles for first session")
+    in_scope=sum(1 for ts in out if START <= ts.date() <= END)
+    if in_scope!=EXPECTED_SESSIONS*48: raise AuditError(f"Expected {EXPECTED_SESSIONS*48} in-scope candles, found {in_scope}")
+    warmup=session_start(START)-timedelta(hours=4)
+    if any(warmup+BAR*i not in out for i in range(8)): raise AuditError("Missing prior US overnight warm-up candles for first session")
     for d in session_dates():
         expected=[session_start(d)+BAR*i for i in range(48)]
         if any(t not in out for t in expected): raise AuditError(f"{d}: missing 30m slot")
