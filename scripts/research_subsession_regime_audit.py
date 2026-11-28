@@ -207,8 +207,10 @@ def self_test():
     good={"session_date":START,"is_complete":True,"profile_status":"COMPLETE","expected_bars":48,"observed_bars":48,"vah_upper":200,"poc_lower":150,"poc_upper":200,"val_lower":100}
     partial={**good,"session_date":START+timedelta(days=1),"is_complete":False,"profile_status":"INCOMPLETE","observed_bars":47}
     missing_poc={**good,"session_date":START+timedelta(days=2),"poc_lower":None}
-    eligible,skipped=filter_profiles([good,partial,missing_poc])
-    assert list(eligible)==[START] and skipped==[START+timedelta(days=1),START+timedelta(days=2)]
+    fixtures=[{**good,"session_date":d} for d in session_dates()]
+    fixtures[1]=partial; fixtures[2]=missing_poc
+    eligible,skipped=filter_profiles(fixtures)
+    assert len(eligible)==EXPECTED_SESSIONS-2 and skipped==[START+timedelta(days=1),START+timedelta(days=2)]
     assert [(a,b,n) for _,a,b,n in WINDOWS]==[(-4,0,8),(0,8,16),(8,13.5,11),(13.5,24,21)]
     p=subprofile([{"low":100,"high":199},{"low":100,"high":199},{"low":150,"high":249},{"low":150,"high":249}])
     assert p=={"val":Decimal("100"),"poc":Decimal("175"),"vah":Decimal("200")}
