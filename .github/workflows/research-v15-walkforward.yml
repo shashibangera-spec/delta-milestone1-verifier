@@ -28,7 +28,7 @@ permissions:
 env:
   PYTHONPATH: .
 concurrency:
-  group: research-v15-walkforward-\${{ github.ref }}
+  group: research-v15-walkforward-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
       - name: Run offline-only tests (no database access)
         run: |
           python scripts/research_v15_walkforward_audit.py --self-test
-          python -m unittest tests.test_research_v15_walkforward_audit
+          python -m unittest discover -s tests -p 'test_research_v15_walkforward_audit.py'
 
   research:
     if: github.event_name == 'workflow_dispatch'
@@ -64,14 +64,14 @@ jobs:
       - name: Validate read-only Neon credentials
         shell: bash
         env:
-          V17_TARGET_READONLY_DATABASE_URL: \${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
-          V17_SOURCE_READONLY_DATABASE_URL: \${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+          V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: ${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
         run: |
           set -euo pipefail
           test -n "$V17_TARGET_READONLY_DATABASE_URL" || { echo 'Missing target read-only Neon credential'; exit 1; }
           test -n "$V17_SOURCE_READONLY_DATABASE_URL" || { echo 'Missing source read-only Neon credential'; exit 1; }
       - name: Run read-only V1.5 walk-forward and OI audit
         env:
-          V17_TARGET_READONLY_DATABASE_URL: \${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
-          V17_SOURCE_READONLY_DATABASE_URL: \${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+          V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: ${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
         run: python scripts/research_v15_walkforward_audit.py
