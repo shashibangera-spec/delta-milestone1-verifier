@@ -178,7 +178,7 @@ def _pcr(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def build_options_context(current: list[dict[str, Any]],
                           baselines: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    """Build descriptive expiry PCR, OI walls and 30m strike-change observations."""
+    """Build descriptive expiry PCR, OI walls and strike changes for each baseline."""
     expiries = []
     for expiry in sorted({r["expiry_date"] for r in current})[:2]:
         subset = [r for r in current if r["expiry_date"] == expiry]
@@ -188,22 +188,26 @@ def build_options_context(current: list[dict[str, Any]],
                       key=lambda r: float(r["oi_btc"] or 0), reverse=True)
         expiries.append({"expiry_date": expiry.isoformat() if isinstance(expiry, date) else str(expiry),
                          "pcr": _pcr(subset), "top_call_walls": calls[:3], "top_put_walls": puts[:3]})
-    events, baseline = [], baselines.get("30m") or []
-    previous_by_product = {int(r["product_id"]): r for r in baseline}
-    for row in current:
-        previous = previous_by_product.get(int(row["product_id"]))
-        if not previous:
-            continue
-        old, new = float(previous["oi_btc"] or 0), float(row["oi_btc"] or 0)
-        if old > 0 and (old - new) / old >= 0.40:
-            kind = "UNWIND"
-        elif new - old >= 15 or (old > 0 and (new - old) / old >= 0.50):
-            kind = "REBUILD"
-        else:
-            continue
-        events.append({"symbol": row["symbol"], "strike_price": row["strike_price"],
-                       "contract_type": row["contract_type"], "kind": kind,
-                       "change_btc": new - old,
-                       "change_pct": ((new - old) / old * 100) if old else None})
+    events = []
+    for baseline_name in ("30m", "1h", "session_open"):
+        previous_by_product = {
+            int(r["product_id"]): r for r in (baselines.get(baseline_name) or [])
+        }
+        for row in current:
+            previous = previous_by_product.get(int(row["product_id"]))
+            if not previous:
+                continue
+            old, new = float(previous["oi_btc"] or 0), float(row["oi_btc"] or 0)
+            if old > 0 and (old - new) / old >= 0.40:
+                kind = "UNWIND"
+            elif new - old >= 15 or (old > 0 and (new - old) / old >= 0.50):
+                kind = "REBUILD"
+            else:
+                continue
+            events.append({"baseline": baseline_name, "symbol": row["symbol"],
+                           "strike_price": row["strike_price"],
+                           "contract_type": row["contract_type"], "kind": kind,
+                           "change_btc": new - old,
+                           "change_pct": ((new - old) / old * 100) if old else None})
     return {"expiries": expiries, "events": events,
             "baselines_available": {key: bool(value) for key, value in baselines.items()}}
