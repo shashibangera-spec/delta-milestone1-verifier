@@ -107,8 +107,8 @@ def subprofile(bars):
 def value_regime(cur,prev):
     if cur is None or prev is None: return "UNAVAILABLE"
     a=(cur["val"],cur["poc"],cur["vah"]); b=(prev["val"],prev["poc"],prev["vah"])
-    if all(x>y for x,y in zip(a,b)): return "VALUE STEPPED UP"
-    if all(x<y for x,y in zip(a,b)): return "VALUE STEPPED DOWN"
+    if cur["val"] > prev["val"] and cur["vah"] > prev["vah"]: return "VALUE STEPPED UP"
+    if cur["val"] < prev["val"] and cur["vah"] < prev["vah"]: return "VALUE STEPPED DOWN"
     return "OVERLAPPING / INSIDE"
 
 def build_blocks(daybars):
@@ -192,7 +192,8 @@ def self_test():
     p=subprofile([{"low":100,"high":199},{"low":100,"high":199},{"low":150,"high":249},{"low":150,"high":249}])
     assert p=={"val":Decimal("100"),"poc":Decimal("175"),"vah":Decimal("200")}
     assert value_regime({"val":200,"poc":225,"vah":250},{"val":100,"poc":125,"vah":150})=="VALUE STEPPED UP"
-    assert value_regime({"val":100,"poc":125,"vah":150},{"val":100,"poc":125,"vah":150})=="OVERLAPPING / INSIDE"
+    assert value_regime({"val":100,"poc":175,"vah":150},{"val":100,"poc":125,"vah":150})=="OVERLAPPING / INSIDE"
+    assert value_regime({"val":200,"poc":100,"vah":250},{"val":100,"poc":225,"vah":150})=="VALUE STEPPED UP"
     assert fee_r(10000,10200,200,TAKER)>fee_r(10000,10200,200,MAKER)
     assert summarize([])["trades"]==0
     s=build_signal({"close":500.0},{"open":500.0,"high":800.0,"low":450.0,"close":550.0},600.0,400.0)
