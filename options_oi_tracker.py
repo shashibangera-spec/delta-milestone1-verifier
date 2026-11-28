@@ -98,11 +98,19 @@ def parse_api_payload(payload: dict[str, Any]) -> tuple[datetime, float, list[di
     rows = payload.get("result")
     if not isinstance(rows, list):
         raise ValueError("Delta options ticker result must be a list")
-    timestamp_us = int(payload.get("timestamp") or 0)
+    # Delta's ticker endpoint may put timestamp and spot_price on each
+    # contract row rather than at the response envelope.
+    timestamps = [int(row.get("timestamp") or 0) for row in rows
+                  if isinstance(row, dict) and int(row.get("timestamp") or 0) > 0]
+    timestamp_us = int(payload.get("timestamp") or (max(timestamps) if timestamps else 0))
     if timestamp_us <= 0:
         raise ValueError("Delta options payload timestamp is missing")
     snapshot_ts = datetime.fromtimestamp(timestamp_us / 1_000_000, tz=timezone.utc)
-    spot = _number(payload.get("spot_price"), "spot_price", required=True)
+    spot_value = payload.get("spot_price")
+    if spot_value is None and rows:
+        spot_value = next((row.get("spot_price") for row in rows
+                           if isinstance(row, dict) and row.get("spot_price") is not None), None)
+    spot = _number(spot_value, "spot_price", required=True)
     return snapshot_ts, float(spot), rows
 
 
