@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "continuous_collector.py"
+      - "options_oi_tracker.py"
+      - "migrations/**"
       - "oi_metrics.py"
       - "browser_dashboard/**"
       - "tests/**"
