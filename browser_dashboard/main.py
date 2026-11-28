@@ -355,6 +355,98 @@ def _calculate_subsession_value_progression(rows, session_date, now):
     return result
 
 
+
+def _build_value_ladder_model(market, cmp, prior, developing, completed_candles,
+                              plot_height=320, min_label_gap=24):
+    """Build display-only, price-proportional ladder coordinates and distance labels.
+
+    This helper consumes values already loaded by the dashboard. It performs no
+    I/O and does not alter AMT or Playbook state.
+    """
+    market = str(market).upper()
+    cmp_value = float(cmp) if cmp is not None else None
+    prior = prior or {}
+    developing = developing or {}
+    levels = [
+        {"key": "prior_vah", "label": "Prior VAH", "lane": "prior", "value": prior.get("vah")},
+        {"key": "prior_poc", "label": "Prior POC", "lane": "prior", "value": prior.get("poc")},
+        {"key": "prior_val", "label": "Prior VAL", "lane": "prior", "value": prior.get("val")},
+        {"key": "dvah", "label": "Live dVAH", "lane": "developing", "value": developing.get("vah")},
+        {"key": "dpoc", "label": "Live dPOC", "lane": "developing", "value": developing.get("poc")},
+        {"key": "dval", "label": "Live dVAL", "lane": "developing", "value": developing.get("val")},
+    ]
+    if int(completed_candles or 0) == 0:
+        for item in levels:
+            if item["lane"] == "developing":
+                item["value"] = None
+    for item in levels:
+        try:
+            item["value"] = float(item["value"]) if item["value"] is not None else None
+        except (TypeError, ValueError):
+            item["value"] = None
+
+    available = [item["value"] for item in levels if item["value"] is not None]
+    if cmp_value is not None:
+        available.append(cmp_value)
+    if available:
+        low, high = min(available), max(available)
+        span = high - low
+        padding = max(span * 0.08, abs(high or 1.0) * 0.0005, 1e-6)
+        low -= padding
+        high += padding
+    else:
+        low, high = 0.0, 1.0
+    height = max(float(plot_height), 120.0)
+    top, bottom = 34.0, height - 24.0
+    def y_for(value):
+        return bottom - ((value - low) / (high - low)) * (bottom - top)
+
+    for item in levels:
+        item["y"] = y_for(item["value"]) if item["value"] is not None else None
+        item["label_y"] = item["y"]
+    # Stagger labels independently within each lane while preserving true y.
+    for lane in ("prior", "developing"):
+        lane_items = sorted(
+            [item for item in levels if item["lane"] == lane and item["y"] is not None],
+            key=lambda item: item["y"],
+        )
+        for index in range(1, len(lane_items)):
+            if lane_items[index]["label_y"] - lane_items[index - 1]["label_y"] < min_label_gap:
+                lane_items[index]["label_y"] = lane_items[index - 1]["label_y"] + min_label_gap
+        if lane_items and lane_items[-1]["label_y"] > bottom:
+            shift = lane_items[-1]["label_y"] - bottom
+            for item in lane_items:
+                item["label_y"] -= shift
+        if lane_items and lane_items[0]["label_y"] < top:
+            shift = top - lane_items[0]["label_y"]
+            for item in lane_items:
+                item["label_y"] += shift
+
+    above = min(
+        (item["value"] for item in levels if item["value"] is not None and cmp_value is not None and item["value"] > cmp_value),
+        default=None,
+    )
+    below = max(
+        (item["value"] for item in levels if item["value"] is not None and cmp_value is not None and item["value"] < cmp_value),
+        default=None,
+    )
+    def distance(level):
+        if level is None or cmp_value is None or cmp_value == 0:
+            return None
+        points = level - cmp_value
+        return {"level": level, "points": points, "percent": abs(points) / abs(cmp_value) * 100}
+    return {
+        "market": market,
+        "cmp": cmp_value,
+        "nearest_above": distance(above),
+        "nearest_below": distance(below),
+        "playbook_boundaries": market == "BTCUSD",
+        "candle_count": int(completed_candles or 0),
+        "plot_height": height,
+        "levels": levels,
+    }
+
+
 def load_overview():
     now = datetime.now(timezone.utc)
     session_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -481,7 +573,23 @@ def load_overview():
         delta = oi_context["entry_oi"] - oi_context["opening_oi"]
         oi_context.update({"delta": delta, "class": "EXPANSION" if delta > 0 else "CONTRACTION_OR_FLAT"})
 
+    btc_ladder = _build_value_ladder_model(
+        "BTCUSD",
+        latest_price_rows[-1]["close_value"] if latest_price_rows else None,
+        {
+            "vah": prior_profile.get("vah_upper") if prior_profile else None,
+            "poc": ((float(prior_profile["poc_lower"]) + float(prior_profile["poc_upper"])) / 2)
+                  if prior_profile and prior_profile.get("poc_lower") is not None and prior_profile.get("poc_upper") is not None else None,
+            "val": prior_profile.get("val_lower") if prior_profile else None,
+        },
+        {"vah": live_developing.get("dvah"),
+         "poc": ((float(live_developing["dpoc_lower"]) + float(live_developing["dpoc_upper"])) / 2)
+               if live_developing.get("dpoc_lower") is not None and live_developing.get("dpoc_upper") is not None else None,
+         "val": live_developing.get("dval")},
+        live_developing.get("candle_count", 0),
+    )
     return _json({
+        "value_ladder": btc_ladder,
         "as_of_utc": now,
         "profile": profile,
         "prior_profile": prior_profile,
@@ -621,7 +729,18 @@ def load_nifty_overview():
                 prior_range["high"], prior_range["low"],
                 float(prior["vah"]) if prior and prior.get("vah") is not None else None,
                 float(prior["val"]) if prior and prior.get("val") is not None else None)}
-    return _json({"as_of_utc":now,"latest_price":None if latest is None else {
+    nifty_ladder = _build_value_ladder_model(
+        "NIFTY 50 SPOT",
+        None if latest is None else latest["close"],
+        {"vah": prior.get("vah") if prior else None,
+         "poc": prior.get("poc") if prior else None,
+         "val": prior.get("val") if prior else None},
+        {"vah": developing.get("vah") if developing else None,
+         "poc": developing.get("poc") if developing else None,
+         "val": developing.get("val") if developing else None},
+        len(prefix),
+    )
+    return _json({"value_ladder":nifty_ladder,"as_of_utc":now,"latest_price":None if latest is None else {
         "close":float(latest["close"]),"timestamp":latest["timestamp"].to_pydatetime()},
         "prior":prior,"developing":None if developing is None else {
         "dvah":developing["vah"],"dpoc":developing["poc"],"dval":developing["val"],"status":"READY"},
@@ -681,11 +800,33 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
 .tabbar{display:flex;gap:8px;margin:0 0 16px}.tab{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:9px 16px;border-radius:9px;font-weight:650;cursor:pointer}.tab.active{color:var(--text);border-color:var(--cyan);box-shadow:inset 0 -2px var(--cyan)}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){main{padding:12px}.grid{grid-template-columns:1fr 1fr}.metric{font-size:19px}.levels{grid-template-columns:1fr}}
+ 
+.ladder-card{overflow:hidden}.ladder-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.ladder-heading h2{margin:0 0 3px}.ladder-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.ladder-metric{min-width:0;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#0e1723}
+.ladder-metric small{display:block;font-size:10px;letter-spacing:.07em;text-transform:uppercase}
+.ladder-metric strong{display:block;font:650 clamp(14px,1.5vw,20px) ui-monospace,monospace;margin-top:3px;overflow-wrap:anywhere}
+.ladder-metric .detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.ladder-metric.cmp strong{color:var(--green)}.ladder-metric.above strong{color:var(--amber)}.ladder-metric.below strong{color:var(--cyan)}
+.ladder-plot{width:100%;min-width:0}.ladder-svg{display:block;width:100%;height:auto;overflow:visible}
+.ladder-svg text{font-family:Inter,ui-sans-serif,system-ui,sans-serif}.ladder-svg .lane-title{fill:var(--muted);font-size:13px;font-weight:700;letter-spacing:.04em}
+.ladder-svg .level-label{fill:var(--text);font-size:13px;font-weight:650}.ladder-svg .level-price{fill:var(--muted);font:12px ui-monospace,monospace}
+.ladder-svg .prior-line{stroke:#8394ad;stroke-width:1.2;stroke-dasharray:4 4;opacity:.8}.ladder-svg .dev-line{stroke:var(--cyan);stroke-width:1.3;stroke-dasharray:3 4;opacity:.9}
+.ladder-svg .leader{stroke:#71839b;stroke-width:1;fill:none}.ladder-svg .cmp-line{stroke:var(--green);stroke-width:3.5}.ladder-svg .cmp-label{fill:#062d22;stroke:var(--green);stroke-width:1}
+.ladder-svg .cmp-text{fill:#d8fff0;font-size:14px;font-weight:800}.ladder-svg .axis{stroke:#a8b8cb;stroke-width:2}.ladder-svg .axis-tick{stroke:#a8b8cb;stroke-width:1.5}
+.ladder-note{margin-top:9px}.ladder-empty{padding:20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:9px}
+@media(max-width:767px){main{padding:10px}.ladder-card{padding:10px}.ladder-heading{gap:6px}.ladder-heading h2{font-size:11px}.ladder-heading .sub{font-size:10px}.ladder-metrics{gap:5px}.ladder-metric{padding:7px 6px}.ladder-metric small{font-size:9px;line-height:1.25}.ladder-metric strong{font-size:clamp(11px,3.2vw,15px)}.ladder-metric .detail{font-size:9px;line-height:1.3}.ladder-svg .lane-title{font-size:12px}.ladder-svg .level-label{font-size:12px}.ladder-svg .level-price{font-size:11px}.ladder-svg .cmp-text{font-size:13px}}
+@media(max-width:390px){.ladder-metric{padding:6px 4px}.ladder-metric strong{font-size:11px}.ladder-metric .detail{font-size:8px}}
 </style></head>
 <body><main>
 <header><div><h1>MARKET AMT DASHBOARD</h1><div class="muted">Read-only market structure and observation</div></div><div class="stamp" id="asof">Loading…</div></header>
 <nav class="tabbar" aria-label="Market dashboard"><button id="tab-btc" class="tab active" type="button">BTCUSD</button><button id="tab-nifty" class="tab" type="button">NIFTY 50 SPOT</button></nav>
 <section id="nifty-view" class="section" hidden>
+<section class="panel section ladder-card" id="nifty-value-ladder-card" aria-label="NIFTY 50 Spot prior and developing value ladder">
+ <div class="ladder-heading"><div><h2>VALUE LADDER · PRIOR VS LIVE DEVELOPING</h2><div class="sub">NIFTY 50 SPOT · Descriptive nearest-level references; no active Playbook triggers</div></div><span class="pill">READ-ONLY</span></div>
+ <div class="ladder-metrics" id="nifty-ladder-metrics"></div><div class="ladder-plot" id="nifty-ladder-plot" aria-live="polite"></div>
+ <div class="sub ladder-note">Nearest levels are descriptive references only. No NIFTY Playbook trigger or trade-boundary rule is implied.</div>
+</section>
 <section class="grid">
 <div class="panel"><h2>Latest NIFTY 50 Spot</h2><div class="metric" id="nifty-price">—</div><div class="sub" id="nifty-price-time">Completed 15m Yahoo candle</div></div>
 <div class="panel"><h2>Prior Session Close Location</h2><div class="metric" id="nifty-close-location">—</div><div class="sub" id="nifty-session-date">—</div></div>
@@ -702,6 +843,11 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
 <footer>NIFTY 50 Spot · Yahoo Finance ^NSEI · 10-point TPO rows · 70% value area · 09:15–15:30 IST. No OI or BTC data dependency.</footer>
 </section>
 <div id="btc-view">
+<section class="panel section ladder-card" id="btc-value-ladder-card" aria-label="BTCUSD prior and developing value ladder">
+ <div class="ladder-heading"><div><h2>VALUE LADDER · PRIOR VS LIVE DEVELOPING</h2><div class="sub">BTCUSD · Prior VAH/VAL are Playbook v1.4 boundary references only</div></div><span class="pill">READ-ONLY</span></div>
+ <div class="ladder-metrics" id="btc-ladder-metrics"></div><div class="ladder-plot" id="btc-ladder-plot" aria-live="polite"></div>
+ <div class="sub ladder-note">Prior VAH / VAL are frozen Playbook v1.4 boundary references, not automatic entry signals. Developing values use completed current-session candles only.</div>
+</section>
 <section class="grid">
  <div class="panel"><h2>Latest BTC price</h2><div class="metric" id="price">—</div><div class="sub" id="price-time">—</div></div>
  <div class="panel"><h2>Causal discovery</h2><div class="metric" id="discovery">—</div><div class="sub">Completed 30m closes only</div></div>
@@ -760,7 +906,7 @@ function selectMarket(market){
 }
 async function refreshNifty(){
  const r=await fetch('/api/nifty-overview',{cache:'no-store'});if(!r.ok)throw new Error('API '+r.status);
- const d=await r.json(),p=d.prior||{},v=d.developing||{},cr=d.current_range||{},pr=d.prior_range||{},px=d.latest_price||{};
+ const d=await r.json(),p=d.prior||{},v=d.developing||{},cr=d.current_range||{},pr=d.prior_range||{},px=d.latest_price||{}; renderValueLadder('nifty',d.value_ladder);
  document.getElementById('nifty-price').textContent=fmt(px.close);
  document.getElementById('nifty-price-time').textContent=px.timestamp?'Completed 15m candle · '+new Date(px.timestamp).toISOString().slice(0,16)+' UTC':'No completed Yahoo candle';
  document.getElementById('nifty-session-date').textContent=p.session_date?'Session '+p.session_date:'No persisted completed session';
@@ -784,11 +930,44 @@ async function refreshNifty(){
  ).join('')||'<tr><td colspan="10">No completed NSE brackets available</td></tr>';
 }
 
+
+function ladderNumber(v){return v===null||v===undefined||!Number.isFinite(Number(v))?'N/A':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});}
+const ladderModels={};
+function renderValueLadder(prefix,model){
+ ladderModels[prefix]=model;
+ const metrics=document.getElementById(prefix+'-ladder-metrics'),plot=document.getElementById(prefix+'-ladder-plot');
+ if(!model||model.cmp===null||model.cmp===undefined){metrics.innerHTML='<div class="ladder-metric cmp"><small>LIVE CMP</small><strong>N/A</strong></div><div class="ladder-metric"><small>Nearest Level Above</small><strong>N/A</strong></div><div class="ladder-metric"><small>Nearest Level Below</small><strong>N/A</strong></div>';plot.innerHTML='<div class="ladder-empty">Value ladder unavailable — source CMP is not available.</div>';return;}
+ const metric=(label,item,kind)=>'<div class="ladder-metric '+kind+'"><small>'+label+'</small><strong>'+ (item?ladderNumber(item.level):'N/A')+'</strong><div class="detail">'+(item?((item.points>0?'+':'')+ladderNumber(item.points)+' pts · '+ladderNumber(item.percent)+'%'):'No level available')+'</div></div>';
+ metrics.innerHTML='<div class="ladder-metric cmp"><small>LIVE CMP</small><strong>'+ladderNumber(model.cmp)+'</strong><div class="detail">Latest available source price</div></div>'+
+  metric('Nearest Level Above',model.nearest_above,'above')+metric('Nearest Level Below',model.nearest_below,'below');
+ const mobile=window.matchMedia('(max-width:767px)').matches,width=mobile?360:1000,height=320,leftX=mobile?8:24,rightX=mobile?352:976,axisX=mobile?180:500,dividerLeft=mobile?120:333,dividerRight=mobile?240:667,top=34,bottom=height-24;
+ const values=model.levels.filter(x=>x.value!==null&&x.value!==undefined).map(x=>Number(x.value)).concat([Number(model.cmp)]);
+ let lo=Math.min(...values),hi=Math.max(...values),span=hi-lo,pad=Math.max(span*.08,Math.abs(hi)*.0005,1e-6);lo-=pad;hi+=pad;
+ const y=value=>bottom-((Number(value)-lo)/(hi-lo))*(bottom-top);
+ const laneTitles='<text class="lane-title" x="'+leftX+'" y="20">PRIOR</text><text class="lane-title" x="'+axisX+'" y="20" text-anchor="middle">PRICE AXIS</text><text class="lane-title" x="'+rightX+'" y="20" text-anchor="end">DEVELOPING</text>';
+ let svg='<svg class="ladder-svg" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+model.market+' price-proportional prior and developing value ladder">';
+ svg+=laneTitles+'<line x1="'+dividerLeft+'" y1="28" x2="'+dividerLeft+'" y2="'+(height-10)+'" stroke="#243247"/><line x1="'+dividerRight+'" y1="28" x2="'+dividerRight+'" y2="'+(height-10)+'" stroke="#243247"/><line class="axis" x1="'+axisX+'" y1="30" x2="'+axisX+'" y2="'+(height-12)+'"/>';
+ for(let t=0;t<7;t++){let yy=top+(bottom-top)*t/6;svg+='<line class="axis-tick" x1="'+(axisX-7)+'" y1="'+yy+'" x2="'+(axisX+7)+'" y2="'+yy+'"/>';}
+ const prior=model.levels.filter(x=>x.lane==='prior'&&x.value!==null).sort((a,b)=>a.y-b.y);
+ const dev=model.levels.filter(x=>x.lane==='developing'&&x.value!==null).sort((a,b)=>a.y-b.y);
+ for(const item of model.levels.filter(x=>x.value!==null)){
+  const yy=y(item.value),isPrior=item.lane==='prior',labelY=Number(item.label_y),lineClass=isPrior?'prior-line':'dev-line',x1=isPrior?dividerLeft:dividerRight,x2=isPrior?axisX-25:axisX+25;
+  svg+='<line class="'+lineClass+'" x1="'+x1+'" y1="'+yy+'" x2="'+x2+'" y2="'+yy+'"/>';
+  if(Math.abs(labelY-yy)>1)svg+='<path class="leader" d="M '+x2+' '+yy+' L '+(isPrior?dividerLeft-10:dividerRight+10)+' '+labelY+'"/>';
+  const tx=isPrior?leftX:rightX,anchor=isPrior?'start':'end',label=item.label+(model.playbook_boundaries&&(item.key==='prior_vah'||item.key==='prior_val')?' · V1.4':'');
+  svg+='<text class="level-label" x="'+tx+'" y="'+(labelY-3)+'" text-anchor="'+anchor+'">'+label+'</text><text class="level-price" x="'+tx+'" y="'+(labelY+13)+'" text-anchor="'+anchor+'">'+ladderNumber(item.value)+'</text>';
+ }
+ const cmpY=y(model.cmp),cmpText='LIVE CMP — '+ladderNumber(model.cmp);
+ svg+='<line class="cmp-line" x1="4" y1="'+cmpY+'" x2="'+(width-4)+'" y2="'+cmpY+'"/><rect class="cmp-label" x="'+(axisX-82)+'" y="'+(cmpY-13)+'" width="164" height="26" rx="8"/><text class="cmp-text" x="'+axisX+'" y="'+(cmpY+5)+'" text-anchor="middle">'+cmpText+'</text></svg>';
+ plot.innerHTML=svg;
+}
+window.addEventListener('resize',()=>{for(const [key,model] of Object.entries(ladderModels))renderValueLadder(key,model)});
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:2});
 const cls=v=>String(v||'').includes('ABOVE')||v==='EXPANSION'?'green':String(v||'').includes('BELOW')||v==='CONTRACTION_OR_FLAT'?'red':'amber';
 async function refresh(){
  const r=await fetch('/api/overview',{cache:'no-store'});if(!r.ok)throw new Error('API '+r.status);
  const d=await r.json();const p=d.profile||{},v=d.developing||{},l=d.live||{},sh=d.shadow||{};
+ renderValueLadder('btc',d.value_ladder);
  document.getElementById('asof').textContent='UTC '+new Date(d.as_of_utc).toISOString().replace('T',' ').slice(0,19);
  const px=l.price||{};document.getElementById('price').textContent=fmt(px.close_value);
  document.getElementById('price-time').textContent=px.candle_time?'Candle '+new Date(px.candle_time).toISOString().slice(0,16)+' UTC':'No live candle';
