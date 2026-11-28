@@ -937,8 +937,8 @@ footer{margin-top:18px;color:var(--muted);font-size:11px}.structure-status{margi
  <div class="scroll"><table><thead><tr><th>Expiry</th><th>Call OI (BTC)</th><th>Put OI (BTC)</th><th>Put / Call</th><th>Largest Call OI</th><th>Largest Put OI</th></tr></thead>
  <tbody id="options-oi-expiries"><tr><td colspan="6">Awaiting options snapshots…</td></tr></tbody></table></div>
  <h3>STRIKE OI CHANGES VS ~30M BASELINE</h3>
- <div class="scroll"><table><thead><tr><th>Contract</th><th>Strike</th><th>Observation</th><th>Δ OI (BTC)</th><th>Δ OI (%)</th></tr></thead>
- <tbody id="options-oi-events"><tr><td colspan="5">Awaiting comparable snapshots…</td></tr></tbody></table></div>
+ <div class="scroll"><table><thead><tr><th>Baseline</th><th>Contract</th><th>Strike</th><th>Observation</th><th>Δ OI (BTC)</th><th>Δ OI (%)</th></tr></thead>
+ <tbody id="options-oi-events"><tr><td colspan="6">Awaiting comparable snapshots…</td></tr></tbody></table></div>
  <div class="sub">PCR = put OI / call OI in the selected ATM ±6 strike window. Walls are highest observed OI in that same window. Missing comparison snapshots are not inferred.</div>
 </section>
 <section class="grid">
@@ -1088,7 +1088,7 @@ async function refreshOptionsOi(){
   }).join('')||'<tr><td colspan="6">No current expiry rows</td></tr>';
   document.getElementById('options-oi-events').innerHTML=(data.events||[]).map(e=>
    '<tr><td>'+e.contract_type.replace('_options','').toUpperCase()+'</td><td>'+fmt(e.strike_price)+'</td><td>'+e.kind+'</td><td>'+fmt(e.change_btc)+'</td><td>'+(e.change_pct===null?'—':fmt(e.change_pct)+'%')+'</td></tr>'
-  ).join('')||'<tr><td colspan="5">No strike crossed the descriptive unwind/rebuild thresholds, or ~30m comparison is unavailable.</td></tr>';
+  ).join('')||'<tr><td colspan="6">No strike crossed the descriptive unwind/rebuild thresholds, or comparison snapshots are unavailable.</td></tr>';
  }catch(e){
   status.textContent='Options OI unavailable: '+e.message;
  }
