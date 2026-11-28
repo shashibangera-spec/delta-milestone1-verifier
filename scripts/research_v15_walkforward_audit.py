@@ -111,7 +111,7 @@ def test_a_replay(daily,blocks,oi,flat):
     return output
 
 def build_test_b_candidates(blocks,eligible,flat,idx):
-    events=[]; controls=[]; unresolved={"IN_SAMPLE":0,"BLIND_OUT_OF_SAMPLE":0}
+    events=[]; controls=[]
     for d in base.evaluation_dates():
         split=split_for_day(d)
         if not split or d not in eligible: continue
@@ -126,13 +126,13 @@ def build_test_b_candidates(blocks,eligible,flat,idx):
                        and cur["regime"]=="OVERLAPPING / INSIDE")
                 outcome=bounded_exit(ts,"LONG",entry,stop,entry+2*risk,flat,idx,split)
                 row={"entry_time":ts+BAR,"day":d,"split":split,"sub_session":name,
-                     "risk_points":risk,"is_event":event}
-                if event:
-                    if outcome is None: unresolved[split]+=1
-                    else: events.append({**row,**outcome})
-                elif outcome is not None: controls.append({**row,**outcome})
+                     "risk_points":risk,"outcome":outcome}
+                # Keep censored candidates in the matching pool: matching must not
+                # depend on whether a future exit happened to resolve.
+                if event: events.append(row)
+                else: controls.append(row)
             prior_name=name
-    return events,controls,unresolved
+    return events,controls
 
 def match_controls(events,controls):
     """Chronological greedy 1:1 matching; closest width, no replacement, earliest timestamp tie."""
@@ -148,14 +148,19 @@ def match_controls(events,controls):
 
 def test_b_replay(blocks,eligible,flat):
     idx={b["candle_time"]:i for i,b in enumerate(flat)}
-    events,controls,unresolved=build_test_b_candidates(blocks,eligible,flat,idx)
+    events,controls=build_test_b_candidates(blocks,eligible,flat,idx)
     pairs,unmatched=match_controls(events,controls); result={}
     for split in ("IN_SAMPLE","BLIND_OUT_OF_SAMPLE"):
         matched=[p for p in pairs if p["event"]["split"]==split]
-        erows=[p["event"] for p in matched]; crows=[p["control"] for p in matched]
+        complete=[p for p in matched if p["event"]["outcome"] is not None and p["control"]["outcome"] is not None]
+        erows=[p["event"]["outcome"] for p in complete]
+        crows=[p["control"]["outcome"] for p in complete]
         result[split]={"reclaim_events":summarize(erows),"one_to_one_matched_controls":summarize(crows),
-            "matched_pairs":len(matched),"unmatched_reclaim_events":sum(x["split"]==split for x in unmatched),
-            "unresolved_or_censored_reclaim_events":unresolved[split],
+            "matched_pairs":len(matched),"complete_pairs_used_for_metrics":len(complete),
+            "unmatched_reclaim_events":sum(x["split"]==split for x in unmatched),
+            "censored_matched_pairs":sum(1 for p in matched if p["event"]["outcome"] is None or p["control"]["outcome"] is None),
+            "censored_reclaim_events":sum(1 for x in events if x["split"]==split and x["outcome"] is None),
+            "censored_control_candidates":sum(1 for x in controls if x["split"]==split and x["outcome"] is None),
             "mean_absolute_stop_width_difference":sum(p["absolute_stop_width_difference"] for p in matched)/len(matched) if matched else None}
     return result
 
