@@ -944,7 +944,7 @@ function renderValueLadder(prefix,model){
  const values=model.levels.filter(x=>x.value!==null&&x.value!==undefined).map(x=>Number(x.value)).concat([Number(model.cmp)]);
  let lo=Math.min(...values),hi=Math.max(...values),span=hi-lo,pad=Math.max(span*.08,Math.abs(hi)*.0005,1e-6);lo-=pad;hi+=pad;
  const y=value=>bottom-((Number(value)-lo)/(hi-lo))*(bottom-top);
- const laneTitles='<text class="lane-title" x="24" y="20">PRIOR VALUE'+(model.playbook_boundaries?' · V1.4 BOUNDARIES':'')+'</text><text class="lane-title" x="500" y="20" text-anchor="middle">SHARED PRICE AXIS</text><text class="lane-title" x="976" y="20" text-anchor="end">LIVE DEVELOPING VALUE</text>';
+ const laneTitles='<text class="lane-title" x="'+leftX+'" y="20">PRIOR</text><text class="lane-title" x="'+axisX+'" y="20" text-anchor="middle">PRICE AXIS</text><text class="lane-title" x="'+rightX+'" y="20" text-anchor="end">DEVELOPING</text>';
  let svg='<svg class="ladder-svg" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+model.market+' price-proportional prior and developing value ladder">';
  svg+=laneTitles+'<line x1="'+dividerLeft+'" y1="28" x2="'+dividerLeft+'" y2="'+(height-10)+'" stroke="#243247"/><line x1="'+dividerRight+'" y1="28" x2="'+dividerRight+'" y2="'+(height-10)+'" stroke="#243247"/><line class="axis" x1="'+axisX+'" y1="30" x2="'+axisX+'" y2="'+(height-12)+'"/>';
  for(let t=0;t<7;t++){let yy=top+(bottom-top)*t/6;svg+='<line class="axis-tick" x1="'+(axisX-7)+'" y1="'+yy+'" x2="'+(axisX+7)+'" y2="'+yy+'"/>';}
