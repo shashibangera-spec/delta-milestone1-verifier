@@ -1,0 +1,39 @@
+name: Nifty 50 Spot V1.7 daily close and backfill
+on:
+  schedule:
+    - cron: "15 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "validate Yahoo history only, persist daily close, or run validated 54-session initial backfill"
+        required: true
+        type: choice
+        options: [validate, daily, backfill]
+        default: daily
+permissions:
+  contents: read
+concurrency:
+  group: nifty-v17-production-writer
+  cancel-in-progress: false
+jobs:
+  nifty-v17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NIFTY_V17_DATABASE_URL: ${{ secrets.NIFTY_V17_DATABASE_URL }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install isolated Nifty dependencies
+        run: python -m pip install "pandas>=2.2,<3" "yfinance>=0.2.66,<1" "psycopg[binary]==3.2.3"
+      - name: Run scheduled daily close or selected manual mode
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            python -m amt_engine.nifty_v17 daily
+          else
+            python -m amt_engine.nifty_v17 "${{ github.event.inputs.mode }}"
+          fi

@@ -1,0 +1,77 @@
+name: BTC Sub-Session Regime Audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/research-subsession-regime.yml'
+      - 'scripts/research_subsession_regime_audit.py'
+      - 'amt_engine/daily.py'
+      - 'amt_engine/playbook_v14.py'
+      - 'requirements.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/research-subsession-regime.yml'
+      - 'scripts/research_subsession_regime_audit.py'
+      - 'amt_engine/daily.py'
+      - 'amt_engine/playbook_v14.py'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: .
+
+concurrency:
+  group: research-subsession-regime-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  offline-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project requirements
+        run: python -m pip install -r requirements.txt
+      - name: Compile audit and canonical rule modules
+        run: python -m compileall -q amt_engine/daily.py amt_engine/playbook_v14.py scripts/research_subsession_regime_audit.py
+      - name: Run offline audit self-tests (no database access)
+        run: python scripts/research_subsession_regime_audit.py --self-test
+
+  research:
+    if: github.event_name == 'workflow_dispatch'
+    needs: offline-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project requirements
+        run: python -m pip install -r requirements.txt
+      - name: Validate read-only credentials are present
+        shell: bash
+        env:
+          V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: ${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$V17_TARGET_READONLY_DATABASE_URL" || { echo 'Missing V17_PROD_TARGET_READONLY_DATABASE_URL'; exit 1; }
+          test -n "$V17_SOURCE_READONLY_DATABASE_URL" || { echo 'Missing V17_SOURCE_READONLY_DATABASE_URL'; exit 1; }
+      - name: Run read-only 189-session regime audit
+        env:
+          V17_TARGET_READONLY_DATABASE_URL: ${{ secrets.V17_PROD_TARGET_READONLY_DATABASE_URL }}
+          V17_SOURCE_READONLY_DATABASE_URL: ${{ secrets.V17_SOURCE_READONLY_DATABASE_URL }}
+        run: python scripts/research_subsession_regime_audit.py

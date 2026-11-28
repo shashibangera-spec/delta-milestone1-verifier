@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""Continuous Delta BTCUSD 30m collector for the isolated Neon amt_research branch."""
+import json
+import os
+import signal
+import time
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+
+import psycopg
+from psycopg.rows import dict_row
+
+REST_URL = "https://api.india.delta.exchange/v2/history/candles"
+PRICE_SYMBOL = "BTCUSD"
+OI_SYMBOL = "OI:BTCUSD"
+RESOLUTION = "30m"
+SLOT_SECONDS = 1800
+RETRY_SECONDS = int(os.getenv("RETRY_SECONDS", "15"))
+MAX_RETRY_SECONDS = int(os.getenv("MAX_RETRY_SECONDS", "270"))
+FINALIZATION_GRACE_SECONDS = int(os.getenv("FINALIZATION_GRACE_SECONDS", "15"))
+LOOKBACK_SECONDS = 3 * 24 * 3600
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Immutable original history boundary: do not compare the live table's total row
+# count with these values. The collector appends rows after this UTC boundary.
+EXPECTED_PRICE_ROWS = 8641
+EXPECTED_OI_ROWS = 8641
+EXPECTED_FEATURE_ROWS = 1800
+EXPECTED_FEATURE_START_UTC = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+EXPECTED_FEATURE_MAX_UTC = datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)
+EXPECTED_FEATURE_BASELINE_CHECKSUM = "92672caee9d389c9fd0131723ba3bf23"
+EXPECTED_BASELINE_START_UTC = datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+EXPECTED_BASELINE_MAX_UTC = datetime(2026, 11, 17, 0, 0, tzinfo=timezone.utc)
+EXPECTED_PRICE_BASELINE_CHECKSUM = "34bd6fcf72967e1338ed0d1b174042c4"
+EXPECTED_OI_BASELINE_CHECKSUM = "dfe391968a55d970170c7ed7af6c7bbd"
+EXPECTED_NEON_BRANCH_ID = "br-lingering-grass-ao07mgrx"
+STOP = False
+
+def log(event, **fields):
+    print(json.dumps({"event": event, "utc": datetime.now(timezone.utc).isoformat(), **fields}, sort_keys=True, default=str), flush=True)
+
+def stop_handler(signum, frame):
+    global STOP
+    STOP = True
+    log("shutdown_signal", signal=signum)
+
+signal.signal(signal.SIGTERM, stop_handler)
+signal.signal(signal.SIGINT, stop_handler)
+
+def fetch_candles(symbol, start_ts, end_ts):
+    query = urllib.parse.urlencode({"resolution": RESOLUTION, "symbol": symbol, "start": int(start_ts), "end": int(end_ts)})
+    request = urllib.request.Request(REST_URL + "?" + query, headers={"User-Agent": "delta-amt-research-collector/2.0", "Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=25) as response:
+        payload = json.loads(response.read().decode())
+    if not payload.get("success", False):
+        raise RuntimeError(f"Delta REST success=false for {symbol}: {str(payload)[:500]}")
+    rows = payload.get("result", [])
+    if not isinstance(rows, list):
+        raise RuntimeError(f"Delta REST result is not a list for {symbol}")
+    normalized = {}
+    for row in rows:
+        if not isinstance(row, dict) or row.get("time") is None:
+            continue
+        ts = int(row["time"])
+        if ts % SLOT_SECONDS:
+            raise RuntimeError(f"Off-grid candle timestamp {ts} from {symbol}")
+        def num(*keys):
+            for key in keys:
+                if row.get(key) is not None:
+                    return row[key]
+            return None
+        normalized[ts] = {"time": ts, "open": num("open","o"), "high": num("high","h"), "low": num("low","l"), "close": num("close","c"), "volume": num("volume","v"), "raw": row}
+    return normalized
+
+def create_provisional_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research.delta_candles_provisional (
+            source text NOT NULL DEFAULT 'delta_india',
+            symbol text NOT NULL,
+            series_type text NOT NULL CHECK (series_type IN ('PRICE','OI')),
+            resolution text NOT NULL DEFAULT '30m',
+            candle_time timestamptz NOT NULL,
+            open_value numeric NULL, high_value numeric NULL, low_value numeric NULL,
+            close_value numeric NULL, volume numeric NULL, raw_payload jsonb NOT NULL,
+            status text NOT NULL DEFAULT 'PROVISIONAL_INCOMPLETE' CHECK (status = 'PROVISIONAL_INCOMPLETE'),
+            observed_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (source,symbol,series_type,resolution,candle_time)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS delta_candles_provisional_time_idx ON research.delta_candles_provisional (candle_time)")
+    conn.commit()
+
+def validate_historical_candle_baseline(candles):
+    """Validate only the immutable original PRICE/OI history, not appended rows."""
+    expected = {
+        "PRICE": (EXPECTED_PRICE_ROWS, EXPECTED_PRICE_BASELINE_CHECKSUM),
+        "OI": (EXPECTED_OI_ROWS, EXPECTED_OI_BASELINE_CHECKSUM),
+    }
+    for series_type, (expected_rows, expected_checksum) in expected.items():
+        actual = candles.get(series_type)
+        if actual is None:
+            raise RuntimeError(f"Missing historical {series_type} baseline")
+        if actual["row_count"] != expected_rows:
+            raise RuntimeError(
+                f"{series_type} historical baseline row-count mismatch: "
+                f"expected={expected_rows}, actual={actual['row_count']}"
+            )
+        if actual["first_time"] != EXPECTED_BASELINE_START_UTC or actual["last_time"] != EXPECTED_BASELINE_MAX_UTC:
+            raise RuntimeError(
+                f"{series_type} historical baseline time-range mismatch: "
+                f"expected={EXPECTED_BASELINE_START_UTC}..{EXPECTED_BASELINE_MAX_UTC}, "
+                f"actual={actual['first_time']}..{actual['last_time']}"
+            )
+        if actual["checksum"] != expected_checksum:
+            raise RuntimeError(
+                f"{series_type} historical baseline checksum mismatch: "
+                f"expected={expected_checksum}, actual={actual['checksum']}"
+            )
+
+
+def validate_feature_baseline(features):
+    """Protect the separately frozen AMT feature history."""
+    if features["row_count"] != EXPECTED_FEATURE_ROWS:
+        raise RuntimeError(f"AMT feature baseline row-count mismatch: {features}")
+    if features["first_time"] != EXPECTED_FEATURE_START_UTC or features["last_time"] != EXPECTED_FEATURE_MAX_UTC:
+        raise RuntimeError(f"AMT feature baseline time-range mismatch: {features}")
+    if features["checksum"] != EXPECTED_FEATURE_BASELINE_CHECKSUM:
+        raise RuntimeError(f"AMT feature baseline checksum mismatch: {features}")
+
+
+def validate_incremental_series_integrity(totals):
+    """Fail closed on missing series, off-grid timestamps, or gaps in 30m history."""
+    for series_type in ("PRICE", "OI"):
+        actual = totals.get(series_type)
+        if actual is None:
+            raise RuntimeError(f"Missing incremental {series_type} series")
+        if actual["off_grid"] != 0:
+            raise RuntimeError(f"Off-grid {series_type} rows detected: {actual['off_grid']}")
+        if actual["grid_gaps"] != 0:
+            raise RuntimeError(
+                f"30-minute {series_type} timestamp gaps detected: {actual['grid_gaps']}"
+            )
+
+
+def baseline_snapshot(conn):
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT series_type, COUNT(*)::bigint AS row_count, MIN(candle_time) AS first_time,
+                   MAX(candle_time) AS last_time,
+                   md5(COALESCE(string_agg(concat_ws('|',id::text,source,symbol,series_type,resolution,
+                     candle_time::text,open_value::text,high_value::text,low_value::text,close_value::text,
+                     volume::text,raw_payload::text), E'\\\\n' ORDER BY candle_time,id),'')) AS checksum
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m' AND candle_time <= %s
+              AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            GROUP BY series_type
+        """, (EXPECTED_BASELINE_MAX_UTC,))
+        candles = {row["series_type"]: row for row in cur.fetchall()}
+        cur.execute("""
+            SELECT COUNT(*)::bigint AS row_count, MIN(candle_time) AS first_time, MAX(candle_time) AS last_time,
+                   md5(COALESCE(string_agg(concat_ws('|',source,symbol,resolution,candle_time::text,
+                     session_date::text,cycle_bar::text,cycle_status,price_open::text,price_high::text,
+                     price_low::text,price_close::text,feature_payload::text), E'\\\\n' ORDER BY candle_time),'')) AS checksum
+            FROM research.amt_30m_features
+        """)
+        features = cur.fetchone()
+    validate_historical_candle_baseline(candles)
+    if features["row_count"] != EXPECTED_FEATURE_ROWS:
+        raise RuntimeError(f"AMT feature baseline row-count mismatch: {features}")
+    if features["first_time"] != EXPECTED_FEATURE_START_UTC or features["last_time"] != EXPECTED_FEATURE_MAX_UTC:
+        raise RuntimeError(f"AMT feature baseline time-range mismatch: {features}")
+    if features["checksum"] != EXPECTED_FEATURE_BASELINE_CHECKSUM:
+        raise RuntimeError(f"AMT feature baseline checksum mismatch: {features}")
+    return {"candles":candles,"features":features,"baseline_max":EXPECTED_BASELINE_MAX_UTC}
+
+def verify_baseline_unchanged(conn, baseline):
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT series_type, COUNT(*)::bigint AS row_count,
+                   md5(COALESCE(string_agg(concat_ws('|',id::text,source,symbol,series_type,resolution,
+                     candle_time::text,open_value::text,high_value::text,low_value::text,close_value::text,
+                     volume::text,raw_payload::text), E'\\\\n' ORDER BY candle_time,id),'')) AS checksum
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m' AND candle_time <= %s
+              AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            GROUP BY series_type
+        """,(baseline["baseline_max"],))
+        candle_rows={r["series_type"]:r for r in cur.fetchall()}
+        cur.execute("""
+            SELECT COUNT(*)::bigint AS row_count,
+                   md5(COALESCE(string_agg(concat_ws('|',source,symbol,resolution,candle_time::text,
+                     session_date::text,cycle_bar::text,cycle_status,price_open::text,price_high::text,
+                     price_low::text,price_close::text,feature_payload::text), E'\\\\n' ORDER BY candle_time),'')) AS checksum
+            FROM research.amt_30m_features
+        """)
+        feature_row=cur.fetchone()
+        cur.execute("""
+            WITH scoped AS (
+              SELECT series_type,candle_time
+              FROM research.delta_candles
+              WHERE source='delta_india' AND resolution='30m'
+                AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            ), ordered AS (
+              SELECT series_type,candle_time,
+                     lag(candle_time) OVER (PARTITION BY series_type ORDER BY candle_time) AS previous_time
+              FROM scoped
+            )
+            SELECT series_type,COUNT(*)::bigint AS total_rows,
+                   COUNT(*) FILTER (WHERE EXTRACT(EPOCH FROM candle_time)::bigint % 1800 <> 0)::bigint AS off_grid,
+                   COUNT(*) FILTER (WHERE previous_time IS NOT NULL
+                     AND candle_time - previous_time <> interval '30 minutes')::bigint AS grid_gaps,
+                   MAX(candle_time) AS last_time
+            FROM ordered GROUP BY series_type
+        """)
+        totals={r["series_type"]:r for r in cur.fetchall()}
+    validate_incremental_series_integrity(totals)
+    for series in ("PRICE","OI"):
+        before,after=baseline["candles"][series],candle_rows.get(series)
+        if not after or after["row_count"]!=before["row_count"] or after["checksum"]!=before["checksum"]:
+            raise RuntimeError(f"Historical {series} rows changed: before={before}, after={after}")
+
+    if feature_row["row_count"]!=baseline["features"]["row_count"] or feature_row["checksum"]!=baseline["features"]["checksum"]:
+        raise RuntimeError("Existing amt_30m_features history changed")
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT COUNT(*)::bigint AS unmatched_slots FROM (
+              (SELECT candle_time FROM research.delta_candles WHERE source='delta_india' AND symbol='BTCUSD'
+                 AND series_type='PRICE' AND resolution='30m' AND candle_time > %s
+               EXCEPT SELECT candle_time FROM research.delta_candles WHERE source='delta_india' AND symbol='OI:BTCUSD'
+                 AND series_type='OI' AND resolution='30m' AND candle_time > %s)
+              UNION ALL
+              (SELECT candle_time FROM research.delta_candles WHERE source='delta_india' AND symbol='OI:BTCUSD'
+                 AND series_type='OI' AND resolution='30m' AND candle_time > %s
+               EXCEPT SELECT candle_time FROM research.delta_candles WHERE source='delta_india' AND symbol='BTCUSD'
+                 AND series_type='PRICE' AND resolution='30m' AND candle_time > %s)
+            ) gaps
+        """,(baseline["baseline_max"],baseline["baseline_max"],baseline["baseline_max"],baseline["baseline_max"]))
+        unmatched=cur.fetchone()["unmatched_slots"]
+    if unmatched:
+        raise RuntimeError(f"PRICE/OI confirmed candle timestamps are not aligned: {unmatched}")
+    return {"historical_price_rows_preserved":EXPECTED_PRICE_ROWS,"historical_oi_rows_preserved":EXPECTED_OI_ROWS,
+            "amt_30m_features_preserved":EXPECTED_FEATURE_ROWS,"price_total_rows":totals["PRICE"]["total_rows"],
+            "oi_total_rows":totals["OI"]["total_rows"],"price_off_grid":totals["PRICE"]["off_grid"],
+            "oi_off_grid":totals["OI"]["off_grid"],"price_grid_gaps":totals["PRICE"]["grid_gaps"],
+            "oi_grid_gaps":totals["OI"]["grid_gaps"],"price_last_time":totals["PRICE"]["last_time"],
+            "oi_last_time":totals["OI"]["last_time"],"historical_checksums_unchanged":True,"confirmed_price_oi_timestamps_aligned":True}
+
+def existing_latest(conn):
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("""
+            SELECT series_type,MAX(candle_time) AS last_time
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m'
+              AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            GROUP BY series_type
+        """)
+        return {r["series_type"]:r["last_time"] for r in cur.fetchall()}
+
+def upsert_row(conn,symbol,series_type,candle,provisional=False):
+    candle_time=datetime.fromtimestamp(candle["time"],timezone.utc)
+    payload=json.dumps(candle["raw"],separators=(",",":"),sort_keys=True)
+    if provisional:
+        conn.execute("""
+            INSERT INTO research.delta_candles_provisional
+              (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value,volume,raw_payload,status,observed_at)
+            VALUES ('delta_india',%s,%s,'30m',%s,%s,%s,%s,%s,%s,%s::jsonb,'PROVISIONAL_INCOMPLETE',now())
+            ON CONFLICT (source,symbol,series_type,resolution,candle_time)
+            DO UPDATE SET open_value=EXCLUDED.open_value,high_value=EXCLUDED.high_value,low_value=EXCLUDED.low_value,
+              close_value=EXCLUDED.close_value,volume=EXCLUDED.volume,raw_payload=EXCLUDED.raw_payload,
+              status='PROVISIONAL_INCOMPLETE',observed_at=now()
+        """,(symbol,series_type,candle_time,candle["open"],candle["high"],candle["low"],candle["close"],candle["volume"],payload))
+    else:
+        conn.execute("""
+            INSERT INTO research.delta_candles
+              (source,symbol,series_type,resolution,candle_time,open_value,high_value,low_value,close_value,volume,raw_payload,retrieved_at)
+            VALUES ('delta_india',%s,%s,'30m',%s,%s,%s,%s,%s,%s,%s::jsonb,now())
+            ON CONFLICT (source,symbol,series_type,resolution,candle_time)
+            DO UPDATE SET open_value=EXCLUDED.open_value,high_value=EXCLUDED.high_value,low_value=EXCLUDED.low_value,
+              close_value=EXCLUDED.close_value,volume=EXCLUDED.volume,raw_payload=EXCLUDED.raw_payload,retrieved_at=now()
+            WHERE (research.delta_candles.open_value,research.delta_candles.high_value,research.delta_candles.low_value,
+                   research.delta_candles.close_value,research.delta_candles.volume,research.delta_candles.raw_payload)
+              IS DISTINCT FROM (EXCLUDED.open_value,EXCLUDED.high_value,EXCLUDED.low_value,EXCLUDED.close_value,
+                                EXCLUDED.volume,EXCLUDED.raw_payload)
+        """,(symbol,series_type,candle_time,candle["open"],candle["high"],candle["low"],candle["close"],candle["volume"],payload))
+
+def process_cycle(conn,baseline,first_write_verified):
+    now=time.time()
+    start=int(now-LOOKBACK_SECONDS)
+    prices=fetch_candles(PRICE_SYMBOL,start,int(now))
+    oi=fetch_candles(OI_SYMBOL,start,int(now))
+    paired=sorted(set(prices).intersection(oi))
+    if not paired:
+        log("cycle_no_paired_candles",price_rows=len(prices),oi_rows=len(oi))
+        return first_write_verified
+    confirmed=[]; provisional=[]
+    baseline_epoch=int(baseline["baseline_max"].timestamp())
+    for slot in paired:
+        if slot<=baseline_epoch: continue
+        if slot+SLOT_SECONDS<=now-FINALIZATION_GRACE_SECONDS: confirmed.append(slot)
+        else: provisional.append(slot)
+    latest=existing_latest(conn)
+    max_price=int(latest["PRICE"].timestamp())
+    max_oi=int(latest["OI"].timestamp())
+    saved=[]
+    conn.commit()
+    conn.execute("BEGIN")
+    try:
+        for slot in provisional:
+            for symbol,series_type,candle in ((PRICE_SYMBOL,"PRICE",prices[slot]),(OI_SYMBOL,"OI",oi[slot])):
+                upsert_row(conn,symbol,series_type,candle,provisional=True)
+        for slot in confirmed:
+            if slot<=max_price and slot<=max_oi: continue
+            if slot%SLOT_SECONDS or slot<baseline_epoch+SLOT_SECONDS: raise RuntimeError(f"Invalid confirmed grid slot {slot}")
+            upsert_row(conn,PRICE_SYMBOL,"PRICE",prices[slot])
+            upsert_row(conn,OI_SYMBOL,"OI",oi[slot])
+            conn.execute("DELETE FROM research.delta_candles_provisional WHERE candle_time=%s AND resolution='30m'",
+                         (datetime.fromtimestamp(slot,timezone.utc),))
+            saved.append(slot)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    if saved:
+        log("confirmed_candle_pair_saved",count=len(saved),
+            first_slot_utc=datetime.fromtimestamp(saved[0],timezone.utc).isoformat(),
+            last_slot_utc=datetime.fromtimestamp(saved[-1],timezone.utc).isoformat(),
+            provisional_slots=len(provisional))
+        if not first_write_verified:
+            result=verify_baseline_unchanged(conn,baseline)
+            log("post_first_write_verification",**result)
+            first_write_verified=True
+    else:
+        log("cycle_completed",paired_slots=len(paired),provisional_slots=len(provisional),confirmed_slots_seen=len(confirmed))
+    if not first_write_verified:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM research.delta_candles
+                WHERE source='delta_india' AND resolution='30m' AND candle_time > %s
+                  AND ((series_type='PRICE' AND symbol='BTCUSD') OR (series_type='OI' AND symbol='OI:BTCUSD'))
+            """,(baseline["baseline_max"],))
+            any_new_confirmed = cur.fetchone()[0] > 0
+        if any_new_confirmed:
+            result=verify_baseline_unchanged(conn,baseline)
+            log("post_first_write_verification",**result)
+            first_write_verified=True
+    return first_write_verified
+
+def next_scheduled_wake(now):
+    """Return the next strictly-future UTC :02 or :32 half-hour wake."""
+    now = now.astimezone(timezone.utc)
+    if now.minute < 2:
+        target_minute = 2
+        target_hour = now.hour
+        target_day = now.date()
+    elif now.minute < 32:
+        target_minute = 32
+        target_hour = now.hour
+        target_day = now.date()
+    else:
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        target_minute = 2
+        target_hour = next_hour.hour
+        target_day = next_hour.date()
+    return datetime.combine(
+        target_day, datetime.min.time(), tzinfo=timezone.utc
+    ).replace(hour=target_hour, minute=target_minute)
+
+
+def expected_latest_candle_open(now):
+    """Latest fully closed 30m candle's UTC open timestamp."""
+    epoch = int(now.timestamp())
+    return epoch // SLOT_SECONDS * SLOT_SECONDS - SLOT_SECONDS
+
+
+def retry_deadline_for(now):
+    """Retry only inside the :02/:32 collection window, stopping before :07/:37."""
+    now = now.astimezone(timezone.utc)
+    if 2 <= now.minute < 7:
+        deadline = now.replace(minute=6, second=30, microsecond=0)
+    elif 32 <= now.minute < 37:
+        deadline = now.replace(minute=36, second=30, microsecond=0)
+    else:
+        return now
+    return deadline
+
+
+def latest_pair_covers(conn, expected_slot):
+    """Require the exact expected candle timestamp in both persisted series."""
+    candle_time = datetime.fromtimestamp(expected_slot, timezone.utc)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(DISTINCT series_type)
+            FROM research.delta_candles
+            WHERE source='delta_india' AND resolution='30m'
+              AND candle_time=%s
+              AND ((series_type='PRICE' AND symbol='BTCUSD')
+                OR (series_type='OI' AND symbol='OI:BTCUSD'))
+        """, (candle_time,))
+        return cur.fetchone()[0] == 2
+
+
+def main():
+    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("DATABASE_URL must be PostgreSQL URL")
+    configured_branch = os.getenv("NEON_BRANCH_ID")
+    if configured_branch != EXPECTED_NEON_BRANCH_ID:
+        raise RuntimeError(f"Refusing writes: NEON_BRANCH_ID must equal {EXPECTED_NEON_BRANCH_ID}")
+
+    # Initialize and verify the immutable baseline once; no DB connection is held while sleeping.
+    with psycopg.connect(DATABASE_URL, connect_timeout=20, row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database() AS db,current_schema() AS schema")
+            identity = cur.fetchone()
+        if identity["db"] != "amt_research":
+            raise RuntimeError(f"Refusing writes: unexpected database {identity['db']}")
+        create_provisional_table(conn)
+        baseline = baseline_snapshot(conn)
+
+    log("collector_started", database="amt_research", neon_branch_id=configured_branch,
+        expected_baseline={"PRICE": EXPECTED_PRICE_ROWS, "OI": EXPECTED_OI_ROWS,
+                           "amt_30m_features": EXPECTED_FEATURE_ROWS},
+        baseline_max_utc=baseline["baseline_max"], schedule_utc=":02/:32",
+        retry_seconds=RETRY_SECONDS, max_retry_seconds=MAX_RETRY_SECONDS,
+        finalization_grace_seconds=FINALIZATION_GRACE_SECONDS)
+
+    first_write_verified = False
+    while not STOP:
+        cycle_started = datetime.now(timezone.utc)
+        expected_slot = expected_latest_candle_open(cycle_started)
+        retry_deadline = retry_deadline_for(cycle_started)
+        attempt = 0
+
+        while not STOP:
+            attempt += 1
+            try:
+                # Each attempt releases its connection; Neon can autosuspend between cycles.
+                with psycopg.connect(DATABASE_URL, connect_timeout=20, row_factory=dict_row) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT current_database() AS db")
+                        current_db = cur.fetchone()["db"]
+                    if current_db != "amt_research":
+                        raise RuntimeError(f"Refusing writes: unexpected database {current_db}")
+                    first_write_verified = process_cycle(conn, baseline, first_write_verified)
+                    pair_ready = latest_pair_covers(conn, expected_slot)
+                if pair_ready:
+                    log("scheduled_candle_pair_ready", attempt=attempt,
+                        expected_candle_open_utc=datetime.fromtimestamp(
+                            expected_slot, timezone.utc
+                        ).isoformat())
+                    break
+                log("scheduled_candle_pair_not_ready", attempt=attempt,
+                    expected_candle_open_utc=datetime.fromtimestamp(
+                        expected_slot, timezone.utc
+                    ).isoformat())
+            except Exception as exc:
+                log("cycle_error", attempt=attempt, error=str(exc)[:1000])
+
+            if datetime.now(timezone.utc) >= retry_deadline:
+                log("collector_retry_deadline_missed", expected_candle_open_utc=
+                    datetime.fromtimestamp(expected_slot, timezone.utc).isoformat())
+                break
+            time.sleep(min(RETRY_SECONDS, max(
+                1, (retry_deadline - datetime.now(timezone.utc)).total_seconds()
+            )))
+
+        if STOP:
+            break
+        wake_at = next_scheduled_wake(datetime.now(timezone.utc))
+        log("collector_sleeping_until", next_wake_utc=wake_at.isoformat())
+        while not STOP:
+            remaining = (wake_at - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                break
+            time.sleep(min(1, remaining))
+
+    log("collector_stopped", first_write_verified=first_write_verified)
+
+
+if __name__ == "__main__":
+    main()
