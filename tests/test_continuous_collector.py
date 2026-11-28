@@ -3,6 +3,9 @@ from datetime import datetime, timezone
 
 from continuous_collector import (
     SLOT_SECONDS,
+    next_scheduled_wake,
+    expected_latest_candle_open,
+    retry_deadline_for,
     EXPECTED_PRICE_ROWS,
     EXPECTED_OI_ROWS,
     EXPECTED_FEATURE_ROWS,
@@ -38,6 +41,42 @@ class CollectorSafetyTests(unittest.TestCase):
 
     def test_grid_is_thirty_minutes(self):
         self.assertEqual(SLOT_SECONDS, 1800)
+
+    def test_collector_wakes_at_next_utc_02_or_32_boundary(self):
+        cases = [
+            (datetime(2026, 11, 28, 0, 1, 59, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 31, 59, tzinfo=timezone.utc), datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc), datetime(2026, 11, 28, 1, 2, tzinfo=timezone.utc)),
+            (datetime(2026, 11, 28, 23, 40, tzinfo=timezone.utc), datetime(2026, 11, 29, 0, 2, tzinfo=timezone.utc)),
+        ]
+        for now, expected in cases:
+            with self.subTest(now=now):
+                self.assertEqual(next_scheduled_wake(now), expected)
+
+    def test_expected_latest_candle_is_last_fully_closed_slot(self):
+        self.assertEqual(
+            expected_latest_candle_open(datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            int(datetime(2026, 11, 27, 23, 30, tzinfo=timezone.utc).timestamp()),
+        )
+        self.assertEqual(
+            expected_latest_candle_open(datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            int(datetime(2026, 11, 28, 0, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+    def test_collector_retries_stop_before_playbook_run(self):
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 2, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 6, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 32, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 36, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            retry_deadline_for(datetime(2026, 11, 28, 0, 7, tzinfo=timezone.utc)),
+            datetime(2026, 11, 28, 0, 7, tzinfo=timezone.utc),
+        )
 
     def test_original_baseline_constants_remain_fixed(self):
         self.assertEqual(EXPECTED_PRICE_ROWS, 8641)
