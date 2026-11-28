@@ -1,6 +1,6 @@
 import unittest
 from datetime import date, datetime, timezone
-from scripts.research_v15_walkforward_audit import split_for_day, split_end_exclusive, match_controls, summarize
+from scripts.research_v15_walkforward_audit import split_for_day, split_end_exclusive, match_controls, summarize, classify_oi_delta
 
 UTC=timezone.utc
 
@@ -34,6 +34,11 @@ class WalkForwardAuditTests(unittest.TestCase):
           {"entry_time":datetime(2026,6,3,tzinfo=UTC),"split":"IN_SAMPLE","sub_session":"Europe","risk_points":251.}]
         pairs,_=match_controls(event,controls)
         self.assertEqual(pairs[0]["control"]["entry_time"],datetime(2026,6,3,tzinfo=UTC))
+
+    def test_same_bar_oi_delta_classification(self):
+        self.assertEqual(classify_oi_delta(0.1), 'EXPANSION')
+        self.assertEqual(classify_oi_delta(0.0), 'FLAT_OR_CONTRACTION')
+        self.assertEqual(classify_oi_delta(-0.1), 'FLAT_OR_CONTRACTION')
 
     def test_empty_metrics(self):
         self.assertEqual(summarize([])["trades"],0)
