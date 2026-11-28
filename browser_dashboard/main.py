@@ -825,8 +825,8 @@ def load_options_oi_context():
         return {"status": "UNAVAILABLE", "reason": "No options snapshots available",
                 "expiries": [], "events": [], "snapshot_times": timestamps}
     model = build_options_context(current, {k: grouped[k] for k in ("30m", "1h", "session_open")})
-    return {"status": "READY", **model, "snapshot_times": timestamps,
-            "spot_price": current[0]["spot_price"]}
+    return _json({"status": "READY", **model, "snapshot_times": timestamps,
+                  "spot_price": current[0]["spot_price"]})
 
 
 @app.get("/api/options-oi")
