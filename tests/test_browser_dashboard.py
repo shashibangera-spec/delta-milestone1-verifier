@@ -468,14 +468,14 @@ def test_value_ladder_nifty_is_descriptive_and_has_no_playbook_boundary():
     assert model["playbook_boundaries"] is False
 
 
-def test_value_ladder_label_stagger_preserves_price_positions_and_minimum_gap():
+def test_value_ladder_label_stagger_uses_desktop_and_mobile_minimum_gaps():
     from browser_dashboard.main import _build_value_ladder_model
 
     model = _build_value_ladder_model(
-        "BTCUSD", 100,
-        {"vah": 100.01, "poc": 100.02, "val": 99.99},
-        {"vah": 100.015, "poc": 100.025, "val": 99.985},
-        2, plot_height=260, min_label_gap=24,
+        "BTCUSD", 60000,
+        {"vah": 61950, "poc": 61000, "val": 60500},
+        {"vah": 60050, "poc": 59875, "val": 59550},
+        2, plot_height=320, min_label_gap=24,
     )
     for lane in ("prior", "developing"):
         lane_levels = sorted(
@@ -483,12 +483,40 @@ def test_value_ladder_label_stagger_preserves_price_positions_and_minimum_gap():
             key=lambda item: item["label_y"],
         )
         assert all(
-            right["label_y"] - left["label_y"] >= 24 - 1e-9
+            right["label_y"] - left["label_y"] >= 38 - 1e-9
             for left, right in zip(lane_levels, lane_levels[1:])
         )
-        assert any(item["y"] != item["label_y"] for item in lane_levels)
-    # The underlying level coordinate remains the exact price-proportional coordinate.
+        mobile_levels = sorted(lane_levels, key=lambda item: item["label_y_mobile"])
+        assert all(
+            right["label_y_mobile"] - left["label_y_mobile"] >= 32 - 1e-9
+            for left, right in zip(mobile_levels, mobile_levels[1:])
+        )
+    # Actual price coordinates remain independent of both presentation staggers.
     assert len({round(item["y"], 6) for item in model["levels"] if item["value"] is not None}) > 1
+    developing = [item for item in model["levels"] if item["lane"] == "developing"]
+    assert [item["value"] for item in sorted(developing, key=lambda x: -x["value"])] == [60050, 59875, 59550]
+
+
+def test_value_ladder_expands_svg_height_when_label_stack_exceeds_available_space():
+    from browser_dashboard.main import _build_value_ladder_model
+
+    model = _build_value_ladder_model(
+        "BTCUSD", 60000,
+        {"vah": 61950, "poc": 61000, "val": 60500},
+        {"vah": 60050, "poc": 59875, "val": 59550},
+        2, plot_height=100,
+    )
+    assert model["plot_height"] > 100
+    assert model["plot_height"] >= 34 + 24 + (3 - 1) * 38
+    for lane in ("prior", "developing"):
+        lane_levels = sorted(
+            [item for item in model["levels"] if item["lane"] == lane and item["y"] is not None],
+            key=lambda item: item["label_y"],
+        )
+        assert all(
+            right["label_y"] - left["label_y"] >= 38 - 1e-9
+            for left, right in zip(lane_levels, lane_levels[1:])
+        )
 
 
 def test_value_ladder_zero_completed_candles_returns_na_for_all_developing_levels():
@@ -517,6 +545,8 @@ def test_value_ladder_rendering_is_wired_for_btcusd_and_nifty_responsive_layout(
     assert 'class="leader"' in HTML
     assert "window.matchMedia" in HTML
     assert "width=mobile?360:1000" in HTML
+    assert "height=Math.max(320,Number(model.plot_height)||320)" in HTML
+    assert "mobile?item.label_y_mobile:item.label_y" in HTML
     assert "Nearest Level Above" in HTML
     assert "Nearest Level Below" in HTML
     assert "No NIFTY Playbook trigger" in HTML
