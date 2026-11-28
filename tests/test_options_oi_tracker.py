@@ -73,3 +73,11 @@ def test_pcr_and_walls_are_descriptive():
     model = build_options_context(rows, {})
     assert model["expiries"][0]["pcr"]["put_call_ratio"] == 2
     assert len(model["expiries"][0]["top_put_walls"]) == 1
+
+def test_payload_timestamp_and_spot_can_be_read_from_ticker_rows():
+    row = ticker("P-BTC-60000-291126", 1, "put_options", 60000)
+    row.update({"timestamp": 1795975200000000, "spot_price": "59418.1"})
+    ts, spot, rows = parse_api_payload({"success": True, "result": [row]})
+    assert ts == datetime.fromtimestamp(1795975200, tz=timezone.utc)
+    assert spot == 59418.1
+    assert rows == [row]
